@@ -58,10 +58,10 @@ func profilesCommand() *cli.Command {
 		Flags: []cli.Flag{
 			profileFilterFlag(),
 		},
-		Action: func(_ context.Context, cmd *cli.Command) error {
+		Action: func(ctx context.Context, cmd *cli.Command) error {
 			filter := cmd.String("profile-filter")
 
-			names, err := profiles.List(filter)
+			names, err := profiles.List(ctx, filter)
 			if err != nil {
 				return err
 			}

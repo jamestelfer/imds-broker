@@ -3,6 +3,7 @@ package profiles
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"regexp"
@@ -18,7 +19,12 @@ const DefaultFilter = `ReadOnly|ViewOnly`
 // List returns AWS profile names that match filter. If filter is empty,
 // DefaultFilter is used. Returns an error if filter is not a valid regex.
 // Results are sorted alphabetically.
-func List(filter string) ([]string, error) {
+//
+// Profile discovery scans the config and credentials files for section
+// headers, then validates each candidate with config.LoadSharedConfigProfile
+// so that all profile-format details (the [profile name] prefix, deduplication,
+// env-var file overrides) are handled by the SDK.
+func List(ctx context.Context, filter string) ([]string, error) {
 	if filter == "" {
 		filter = DefaultFilter
 	}
@@ -27,43 +33,77 @@ func List(filter string) ([]string, error) {
 		return nil, fmt.Errorf("profiles: invalid filter regex %q: %w", filter, err)
 	}
 
-	names, err := readAllProfiles()
+	candidates, configFiles, credFiles, err := candidateProfileNames()
 	if err != nil {
 		return nil, err
 	}
 
+	// loadOpts pins the SDK to the same files we scanned so env-var overrides
+	// are honoured consistently.
+	loadOpts := func(o *awsconfig.LoadSharedConfigOptions) {
+		o.ConfigFiles = configFiles
+		o.CredentialsFiles = credFiles
+	}
+
 	var result []string
-	for _, name := range names {
-		if re.MatchString(name) {
-			result = append(result, name)
+	for _, name := range candidates {
+		if _, err := awsconfig.LoadSharedConfigProfile(ctx, name, loadOpts); err == nil {
+			if re.MatchString(name) {
+				result = append(result, name)
+			}
 		}
+		// SharedConfigProfileNotExistError (or any other error) → skip
 	}
 	sort.Strings(result)
 	return result, nil
 }
 
-// readAllProfiles collects unique profile names from both the AWS config file
-// and the credentials file.
-func readAllProfiles() ([]string, error) {
-	seen := make(map[string]struct{})
-	var names []string
+// candidateProfileNames extracts candidate profile names from the AWS config
+// and credentials files and returns them along with the resolved file paths
+// (which callers should forward to LoadSharedConfigProfile for consistency).
+//
+// For the config file, the "profile " prefix required by the config-file format
+// is stripped so that the candidate matches the name expected by the SDK. The
+// SDK itself validates which candidates are real profiles; we only extract names.
+func candidateProfileNames() (candidates []string, configFiles []string, credFiles []string, err error) {
+	configFiles = []string{configFilePath()}
+	credFiles = []string{credentialsFilePath()}
 
+	seen := make(map[string]struct{})
 	add := func(name string) {
+		if name == "" {
+			return
+		}
 		if _, ok := seen[name]; !ok {
 			seen[name] = struct{}{}
-			names = append(names, name)
+			candidates = append(candidates, name)
 		}
 	}
 
-	if err := parseConfigFile(configFilePath(), add); err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("profiles: read config file: %w", err)
+	// Config file: strip the "profile " prefix the format requires; the SDK
+	// validates the result. Sections without that prefix (like [default],
+	// [sso-session …]) are passed through unchanged and will be filtered out
+	// by LoadSharedConfigProfile if they are not real profiles.
+	for _, path := range configFiles {
+		if err = scanSections(path, func(section string) {
+			inner := strings.TrimSpace(section[1 : len(section)-1])
+			name, _ := strings.CutPrefix(inner, "profile ")
+			add(strings.TrimSpace(name))
+		}); err != nil && !os.IsNotExist(err) {
+			return nil, nil, nil, fmt.Errorf("profiles: read config file: %w", err)
+		}
 	}
 
-	if err := parseCredentialsFile(credentialsFilePath(), add); err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("profiles: read credentials file: %w", err)
+	// Credentials file: section names are profile names directly.
+	for _, path := range credFiles {
+		if err = scanSections(path, func(section string) {
+			add(strings.TrimSpace(section[1 : len(section)-1]))
+		}); err != nil && !os.IsNotExist(err) {
+			return nil, nil, nil, fmt.Errorf("profiles: read credentials file: %w", err)
+		}
 	}
 
-	return names, nil
+	return candidates, configFiles, credFiles, nil
 }
 
 func configFilePath() string {
@@ -80,46 +120,10 @@ func credentialsFilePath() string {
 	return awsconfig.DefaultSharedCredentialsFilename()
 }
 
-// parseConfigFile reads [default] and [profile name] sections from an AWS
-// config file, calling add for each profile name discovered.
-func parseConfigFile(path string, add func(string)) error {
-	return scanSections(path, func(section string) {
-		if name, ok := configSectionName(section); ok {
-			add(name)
-		}
-	})
-}
-
-// configSectionName parses an INI section header from an AWS config file.
-// [default] → ("default", true); [profile foo] → ("foo", true); others → ("", false).
-func configSectionName(section string) (string, bool) {
-	inner := strings.TrimSpace(section[1 : len(section)-1])
-	if inner == "default" {
-		return "default", true
-	}
-	if rest, ok := strings.CutPrefix(inner, "profile "); ok {
-		name := strings.TrimSpace(rest)
-		if name != "" {
-			return name, true
-		}
-	}
-	return "", false
-}
-
-// parseCredentialsFile reads [name] sections from an AWS credentials file.
-func parseCredentialsFile(path string, add func(string)) error {
-	return scanSections(path, func(section string) {
-		name := strings.TrimSpace(section[1 : len(section)-1])
-		if name != "" {
-			add(name)
-		}
-	})
-}
-
 // scanSections opens path and calls fn for each INI section header line
-// (lines of the form "[...]"). It is the caller's responsibility to parse
-// the section name from the raw line.
-func scanSections(path string, fn func(line string)) error {
+// (lines matching "[…]"). It is the caller's responsibility to interpret
+// the section name.
+func scanSections(path string, fn func(line string)) (err error) {
 	f, err := os.Open(path) //nolint:gosec // path is from user AWS config env var or home dir, not external input
 	if err != nil {
 		return err
