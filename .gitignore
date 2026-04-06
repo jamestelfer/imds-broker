@@ -1,0 +1,21 @@
+# Build output
+/dist/
+/bin/
+
+# IDE
+.idea
+.vscode
+
+# Environment / shell dotfiles (sandbox artifacts)
+.bash_profile
+.bashrc
+.gitconfig
+.gitmodules
+.mcp.json
+.profile
+.ripgreprc
+.zprofile
+.zshrc
+
+# Claude Code
+.claude/
