@@ -155,6 +155,19 @@ func (b *Broker) StopServer(_ context.Context, serverURL string) error {
 	return nil
 }
 
+// StopAll stops every running server and clears the registry. Safe to call
+// multiple times. Intended for broker shutdown on process exit.
+func (b *Broker) StopAll() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, e := range b.servers {
+		e.stopped = true
+		e.server.Stop()
+	}
+	b.servers = make(map[string]*entry)
+	b.urlIndex = make(map[string]*entry)
+}
+
 // cleanupEntry removes an entry from both registries. Must be called with b.mu held.
 func (b *Broker) cleanupEntry(e *entry) {
 	delete(b.servers, e.key)
