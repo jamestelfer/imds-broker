@@ -37,9 +37,9 @@ func TestSessionTokenProvider_ReturnsTemporaryCredentials(t *testing.T) {
 	stub := &stubSessionToken{
 		output: &sts.GetSessionTokenOutput{
 			Credentials: &stypes.Credentials{
-				AccessKeyId:     ptr("ASIATEMP1234"),
-				SecretAccessKey: ptr("tempSecret"),
-				SessionToken:    ptr("tempSession"),
+				AccessKeyId:     new("ASIATEMP1234"),
+				SecretAccessKey: new("tempSecret"),
+				SessionToken:    new("tempSession"),
 				Expiration:      &expiry,
 			},
 		},

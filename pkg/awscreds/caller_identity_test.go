@@ -21,8 +21,6 @@ func (s *stubCallerIdentity) GetCallerIdentity(ctx context.Context, params *sts.
 	return s.output, s.err
 }
 
-func ptr(s string) *string { return &s }
-
 func TestResolveCallerIdentity_APIError(t *testing.T) {
 	stub := &stubCallerIdentity{err: fmt.Errorf("access denied")}
 
@@ -34,7 +32,7 @@ func TestResolveCallerIdentity_APIError(t *testing.T) {
 func TestResolveCallerIdentity_AssumedRoleARN(t *testing.T) {
 	stub := &stubCallerIdentity{
 		output: &sts.GetCallerIdentityOutput{
-			Arn: ptr("arn:aws:sts::123456789012:assumed-role/MyRole/session"),
+			Arn: new("arn:aws:sts::123456789012:assumed-role/MyRole/session"),
 		},
 	}
 
@@ -46,7 +44,7 @@ func TestResolveCallerIdentity_AssumedRoleARN(t *testing.T) {
 func TestResolveCallerIdentity_UserARN(t *testing.T) {
 	stub := &stubCallerIdentity{
 		output: &sts.GetCallerIdentityOutput{
-			Arn: ptr("arn:aws:iam::123456789012:user/johndoe"),
+			Arn: new("arn:aws:iam::123456789012:user/johndoe"),
 		},
 	}
 
