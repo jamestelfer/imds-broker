@@ -37,6 +37,7 @@ func main() {
 			serveCommand(),
 			profilesCommand(),
 			mcpCommand(),
+			versionCommand(),
 		},
 	}
 
