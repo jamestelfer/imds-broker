@@ -1,3 +1,10 @@
+# Run all checks before committing
+verify: fmt build lint test
+
+# Format all Go source files
+fmt:
+    gofmt -w .
+
 # Run all tests
 test:
     go test ./...
