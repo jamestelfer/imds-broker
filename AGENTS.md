@@ -83,5 +83,4 @@ Use these when fetching documentation via the context7 MCP tool:
 | golangci-lint | `/golangci/golangci-lint` |
 | just (command runner) | `/casey/just` |
 | stretchr/testify | `/stretchr/testify` |
-
-> Note: justinas/alice is not indexed in context7. Refer to https://github.com/justinas/alice for usage.
+| justinas/alice | `/justinas/alice` |
