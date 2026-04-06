@@ -69,6 +69,11 @@ All packages live under `pkg/` for importability. `cmd/` contains only CLI wirin
 - Modern Go only — no backwards-compatibility shims.
 - Use generics where they reduce duplication and improve clarity.
 
+### Commit messages
+- Use [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): description`
+- Common types: `feat`, `fix`, `ci`, `docs`, `refactor`, `test`, `chore`
+- Scope is optional but use it when helpful (e.g. `feat(imdsserver): ...`)
+
 ---
 
 ## Context7 Library IDs

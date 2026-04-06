@@ -10,10 +10,22 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Set up mise
-        uses: jdx/mise-action@v2
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Read just version
+        id: tool-versions
+        run: |
+          version=$(grep '^just' .tool-versions | awk '{print $2}')
+          echo "just=${version}" >> "$GITHUB_OUTPUT"
+
+      - uses: extractions/setup-just@v4
+        with:
+          just-version: ${{ steps.tool-versions.outputs.just }}
 
       - name: Run tests
         run: just test
@@ -22,10 +34,13 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Set up mise
-        uses: jdx/mise-action@v2
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
 
-      - name: Run lint
-        run: just lint
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version-file: .tool-versions
