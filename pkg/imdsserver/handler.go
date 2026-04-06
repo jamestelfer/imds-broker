@@ -33,7 +33,6 @@ type credentialResponse struct {
 
 // imdsHandler holds the state for a single IMDS-compatible HTTP handler.
 type imdsHandler struct {
-	profile       string
 	region        string
 	principalName string
 	logger        *slog.Logger
@@ -44,16 +43,15 @@ type imdsHandler struct {
 // newHandler constructs an http.Handler implementing the IMDSv2 API.
 // principalName is the identity name returned by the credential listing endpoint
 // (in production, derived from STS GetCallerIdentity at startup).
-func newHandler(profile, region, principalName string, logger *slog.Logger, creds CredentialProvider) (http.Handler, error) {
+func newHandler(region, principalName string, logger *slog.Logger, creds CredentialProvider) http.Handler {
 	h := &imdsHandler{
-		profile:       profile,
 		region:        region,
 		principalName: principalName,
 		logger:        logger,
 		creds:         creds,
 		tok:           newToken(),
 	}
-	return h.buildMux(), nil
+	return h.buildMux()
 }
 
 func (h *imdsHandler) buildMux() http.Handler {
@@ -148,26 +146,13 @@ func (h *imdsHandler) handleCredentialDetail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var expiry time.Time
-	if !creds.Expires.IsZero() {
-		expiry = creds.Expires
-	} else {
+	expiry := creds.Expires
+	if expiry.IsZero() {
 		expiry = time.Now().UTC().Add(time.Hour)
 	}
 
-	expiryText, err := expiry.MarshalText()
-	if err != nil {
-		h.logger.Error("failed to marshal credential expiry", "error", err)
-		writeError(w, http.StatusInternalServerError, "InternalError", "Failed to build response")
-		return
-	}
-
-	lastUpdated, err := time.Now().UTC().MarshalText()
-	if err != nil {
-		h.logger.Error("failed to marshal lastUpdated", "error", err)
-		writeError(w, http.StatusInternalServerError, "InternalError", "Failed to build response")
-		return
-	}
+	expiryText, _ := expiry.MarshalText()
+	lastUpdated, _ := time.Now().UTC().MarshalText()
 
 	resp := credentialResponse{
 		Code:            "Success",

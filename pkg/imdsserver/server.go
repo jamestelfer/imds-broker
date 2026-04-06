@@ -47,10 +47,7 @@ func New(opts Options) (*Server, error) {
 		return nil, errors.New("imdsserver: at least one bind address is required")
 	}
 
-	handler, err := newHandler(opts.Profile, opts.Region, opts.PrincipalName, opts.Logger, opts.Credentials)
-	if err != nil {
-		return nil, fmt.Errorf("imdsserver: build handler: %w", err)
-	}
+	handler := newHandler(opts.Region, opts.PrincipalName, opts.Logger, opts.Credentials)
 
 	lc := &net.ListenConfig{}
 	listeners := make([]net.Listener, 0, len(opts.BindAddrs))

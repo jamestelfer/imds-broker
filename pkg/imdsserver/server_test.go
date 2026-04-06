@@ -15,23 +15,16 @@ import (
 	"github.com/jamestelfer/imds-broker/pkg/imdsserver"
 )
 
-type staticCreds struct {
-	creds aws.Credentials
-}
-
-func (s *staticCreds) Retrieve(_ context.Context) (aws.Credentials, error) {
-	return s.creds, nil
-}
-
-func newServerCreds() *staticCreds {
-	return &staticCreds{
-		creds: aws.Credentials{
-			AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
-			SecretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-			SessionToken:    "AQoDYXdzEJr//fake-session-token",
-			Expires:         time.Now().UTC().Add(time.Hour),
-		},
+func newServerCreds() imdsserver.CredentialProvider {
+	creds := aws.Credentials{
+		AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
+		SecretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		SessionToken:    "AQoDYXdzEJr//fake-session-token",
+		Expires:         time.Now().UTC().Add(time.Hour),
 	}
+	return aws.CredentialsProviderFunc(func(_ context.Context) (aws.Credentials, error) {
+		return creds, nil
+	})
 }
 
 func newTestServer(t *testing.T, bindAddrs ...string) *imdsserver.Server {

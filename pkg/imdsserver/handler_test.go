@@ -16,33 +16,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fixedCredentials is a mock CredentialProvider for tests.
-type fixedCredentials struct {
-	creds aws.Credentials
-	err   error
-}
-
-func (f *fixedCredentials) Retrieve(_ context.Context) (aws.Credentials, error) {
-	return f.creds, f.err
-}
-
-func testCreds() *fixedCredentials {
-	return &fixedCredentials{
-		creds: aws.Credentials{
-			AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
-			SecretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-			SessionToken:    "AQoDYXdzEJr//fake-session-token",
-			Expires:         time.Now().UTC().Add(time.Hour),
-		},
+func testCreds() CredentialProvider {
+	creds := aws.Credentials{
+		AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
+		SecretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		SessionToken:    "AQoDYXdzEJr//fake-session-token",
+		Expires:         time.Now().UTC().Add(time.Hour),
 	}
+	return aws.CredentialsProviderFunc(func(_ context.Context) (aws.Credentials, error) {
+		return creds, nil
+	})
 }
 
 func newTestHandler(t *testing.T) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h, err := newHandler("test-profile", "us-east-1", "TestRole", logger, testCreds())
-	require.NoError(t, err)
-	return h
+	return newHandler("us-east-1", "TestRole", logger, testCreds())
 }
 
 // getToken obtains a valid IMDSv2 token from the handler.
@@ -134,8 +123,7 @@ func TestAuthMiddleware_ExpiredToken(t *testing.T) {
 	h := newTestHandler(t)
 	// Use a token from a different handler instance (different secret) to simulate rejection.
 	otherLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	other, err := newHandler("other", "us-west-2", "OtherRole", otherLogger, testCreds())
-	require.NoError(t, err)
+	other := newHandler("us-west-2", "OtherRole", otherLogger, testCreds())
 
 	req := httptest.NewRequest(http.MethodPut, "/latest/api/token", nil)
 	req.Header.Set("X-Aws-Ec2-Metadata-Token-Ttl-Seconds", "60")
