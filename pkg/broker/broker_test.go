@@ -250,6 +250,39 @@ func TestCreateServer_NoDockerGateway_OnlyLocalURL(t *testing.T) {
 	assert.Equal(t, "127.0.0.1:0", capturedBindAddrs[0])
 }
 
+// Test 11: StopAll stops every running server and clears the registry.
+func TestStopAll_StopsAllServers(t *testing.T) {
+	srv1 := newFakeServer("http://127.0.0.1:11111")
+	srv2 := newFakeServer("http://127.0.0.1:22222")
+	callCount := 0
+	factory := func(_ context.Context, profile, _ string, _ []string, _ *slog.Logger) (broker.Server, error) {
+		callCount++
+		if profile == "prod" {
+			return srv1, nil
+		}
+		return srv2, nil
+	}
+	b := newTestBroker(t, noDockerExecutor(), factory)
+
+	_, err := b.CreateServer(context.Background(), "prod", "us-east-1")
+	require.NoError(t, err)
+	_, err = b.CreateServer(context.Background(), "dev", "us-east-1")
+	require.NoError(t, err)
+
+	b.StopAll()
+
+	select {
+	case <-srv1.Done(): // stopped
+	default:
+		t.Fatal("expected srv1 to be stopped")
+	}
+	select {
+	case <-srv2.Done(): // stopped
+	default:
+		t.Fatal("expected srv2 to be stopped")
+	}
+}
+
 // Test 10: StopServer by DockerURL also works (URL index includes Docker URL).
 func TestStopServer_ByDockerURL(t *testing.T) {
 	srv := newFakeServer("http://127.0.0.1:11111", "http://172.17.0.1:22222")

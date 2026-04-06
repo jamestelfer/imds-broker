@@ -16,7 +16,9 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/jamestelfer/imds-broker/pkg/awscreds"
+	"github.com/jamestelfer/imds-broker/pkg/broker"
 	"github.com/jamestelfer/imds-broker/pkg/imdsserver"
+	"github.com/jamestelfer/imds-broker/pkg/mcpserver"
 	"github.com/jamestelfer/imds-broker/pkg/profiles"
 )
 
@@ -34,6 +36,7 @@ func main() {
 		Commands: []*cli.Command{
 			serveCommand(),
 			profilesCommand(),
+			mcpCommand(),
 		},
 	}
 
@@ -69,6 +72,84 @@ func profilesCommand() *cli.Command {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
 			return enc.Encode(names)
+		},
+	}
+}
+
+// imdsFactory is the broker.ServerFactory used in production. It loads AWS
+// credentials for the given profile, validates them via STS, and starts an
+// IMDS server.
+func imdsFactory(ctx context.Context, profile, region string, bindAddrs []string, logger *slog.Logger) (broker.Server, error) {
+	loadOpts := []func(*config.LoadOptions) error{
+		config.WithSharedConfigProfile(profile),
+	}
+	if region != "" {
+		loadOpts = append(loadOpts, config.WithRegion(region))
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("mcp: load AWS config for profile %q: %w", profile, err)
+	}
+
+	stsClient := sts.NewFromConfig(cfg)
+
+	principalName, err := awscreds.ResolveCallerIdentity(ctx, stsClient)
+	if err != nil {
+		return nil, fmt.Errorf("mcp: resolve caller identity for profile %q: %w", profile, err)
+	}
+
+	credProvider := aws.NewCredentialsCache(awscreds.NewSessionTokenProvider(stsClient))
+
+	return imdsserver.New(imdsserver.Options{
+		Profile:       profile,
+		Region:        cfg.Region,
+		PrincipalName: principalName,
+		BindAddrs:     bindAddrs,
+		Logger:        logger,
+		Credentials:   credProvider,
+	})
+}
+
+func mcpCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "mcp",
+		Usage: "Start an MCP server for managing IMDS servers over stdio",
+		Flags: []cli.Flag{
+			profileFilterFlag(),
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			levelStr := cmd.Root().String("log-level")
+			var level slog.Level
+			if err := level.UnmarshalText([]byte(levelStr)); err != nil {
+				return fmt.Errorf("invalid log level %q: %w", levelStr, err)
+			}
+			logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+
+			filter := cmd.String("profile-filter")
+
+			b, err := broker.New(ctx, broker.Options{
+				Logger:        logger,
+				Executor:      broker.OSExecutor{},
+				ServerFactory: imdsFactory,
+			})
+			if err != nil {
+				return fmt.Errorf("mcp: create broker: %w", err)
+			}
+
+			s := mcpserver.New(mcpserver.Options{
+				Broker:        b,
+				ListProfiles:  profiles.List,
+				ProfileFilter: filter,
+				Logger:        logger,
+			})
+
+			if err := s.ServeStdio(); err != nil {
+				logger.Error("MCP server error", "error", err)
+			}
+
+			b.StopAll()
+			return nil
 		},
 	}
 }
