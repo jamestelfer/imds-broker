@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -81,6 +82,15 @@ func New(opts Options) (*Server, error) {
 		}
 		servers[i] = srv
 		go func(s *http.Server, l net.Listener) {
+			defer func() {
+				if r := recover(); r != nil {
+					opts.Logger.Error("imds server panic recovered",
+						"addr", l.Addr(),
+						"panic", fmt.Sprintf("%v", r),
+						"stack", string(debug.Stack()))
+					cancel()
+				}
+			}()
 			if err := s.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				opts.Logger.Error("imds server error", "addr", l.Addr(), "error", err)
 			}
