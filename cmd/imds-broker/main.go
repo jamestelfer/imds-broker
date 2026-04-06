@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/jamestelfer/imds-broker/pkg/awscreds"
 	"github.com/jamestelfer/imds-broker/pkg/imdsserver"
+	"github.com/jamestelfer/imds-broker/pkg/profiles"
 )
 
 func main() {
@@ -31,12 +33,43 @@ func main() {
 		},
 		Commands: []*cli.Command{
 			serveCommand(),
+			profilesCommand(),
 		},
 	}
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+func profileFilterFlag() *cli.StringFlag {
+	return &cli.StringFlag{
+		Name:    "profile-filter",
+		Usage:   "regex to filter AWS profile names",
+		Sources: cli.EnvVars("IMDS_BROKER_PROFILE_FILTER"),
+	}
+}
+
+func profilesCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "profiles",
+		Usage: "List AWS profiles matching the filter",
+		Flags: []cli.Flag{
+			profileFilterFlag(),
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			filter := cmd.String("profile-filter")
+
+			names, err := profiles.List(filter)
+			if err != nil {
+				return err
+			}
+
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(names)
+		},
 	}
 }
 
