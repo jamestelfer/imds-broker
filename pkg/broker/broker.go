@@ -93,31 +93,12 @@ func (b *Broker) CreateServer(ctx context.Context, profile, region string) (Crea
 		b.cleanupEntry(e)
 	}
 
-	bindAddrs := []string{"127.0.0.1:0"}
-	if b.gatewayIP != "" {
-		bindAddrs = append(bindAddrs, b.gatewayIP+":0")
-	}
-
-	srv, err := b.factory(ctx, profile, region, bindAddrs, b.logger)
+	srv, err := b.factory(ctx, profile, region, b.buildBindAddrs(), b.logger)
 	if err != nil {
 		return CreateResult{}, err
 	}
 
-	urls := srv.URLs()
-	e := &entry{
-		server:   srv,
-		localURL: urls[0],
-		key:      key,
-	}
-
-	if b.gatewayIP != "" && len(urls) > 1 {
-		if dURL, err := toDockerURL(urls[1]); err == nil {
-			e.dockerURL = dURL
-		} else {
-			b.logger.Warn("broker: failed to build docker URL", "error", err)
-		}
-	}
-
+	e := b.newEntry(srv, key)
 	b.servers[key] = e
 	b.urlIndex[e.localURL] = e
 	if e.dockerURL != "" {
@@ -125,6 +106,35 @@ func (b *Broker) CreateServer(ctx context.Context, profile, region string) (Crea
 	}
 
 	return CreateResult{LocalURL: e.localURL, DockerURL: e.dockerURL}, nil
+}
+
+// buildBindAddrs returns the bind addresses for a new server: always localhost,
+// plus the Docker gateway IP when one was discovered.
+func (b *Broker) buildBindAddrs() []string {
+	addrs := []string{"127.0.0.1:0"}
+	if b.gatewayIP != "" {
+		addrs = append(addrs, b.gatewayIP+":0")
+	}
+	return addrs
+}
+
+// newEntry constructs an entry from a running server, resolving the Docker URL
+// when a gateway is configured and the server bound a second listener.
+func (b *Broker) newEntry(srv Server, key string) *entry {
+	urls := srv.URLs()
+	e := &entry{
+		server:   srv,
+		localURL: urls[0],
+		key:      key,
+	}
+	if b.gatewayIP != "" && len(urls) > 1 {
+		if dURL, err := toDockerURL(urls[1]); err == nil {
+			e.dockerURL = dURL
+		} else {
+			b.logger.Warn("broker: failed to build docker URL", "error", err)
+		}
+	}
+	return e
 }
 
 // StopServer stops the server matching serverURL and removes it from the
