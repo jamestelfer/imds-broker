@@ -38,7 +38,7 @@ func newTestHandler(t *testing.T) http.Handler {
 func getToken(t *testing.T, h http.Handler, ttl int) string {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPut, "/latest/api/token", nil)
-	req.Header.Set("X-Aws-Ec2-Metadata-Token-Ttl-Seconds", fmt.Sprintf("%d", ttl))
+	req.Header.Set(headerTokenTTL, fmt.Sprintf("%d", ttl))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, "expected 200 getting token: %s", w.Body.String())
@@ -50,14 +50,14 @@ func getToken(t *testing.T, h http.Handler, ttl int) string {
 func TestPutToken_ValidTTL(t *testing.T) {
 	h := newTestHandler(t)
 	req := httptest.NewRequest(http.MethodPut, "/latest/api/token", nil)
-	req.Header.Set("X-Aws-Ec2-Metadata-Token-Ttl-Seconds", "60")
+	req.Header.Set(headerTokenTTL, "60")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.NotEmpty(t, w.Body.String())
 	// Response must echo back the TTL header (required by Go SDK v2).
-	assert.Equal(t, "60", w.Header().Get("X-Aws-Ec2-Metadata-Token-Ttl-Seconds"))
+	assert.Equal(t, "60", w.Header().Get(headerTokenTTL))
 }
 
 func TestPutToken_TTLBoundaries(t *testing.T) {
@@ -79,7 +79,7 @@ func TestPutToken_TTLBoundaries(t *testing.T) {
 		t.Run("ttl="+tc.ttl, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPut, "/latest/api/token", nil)
 			if tc.ttl != "" {
-				req.Header.Set("X-Aws-Ec2-Metadata-Token-Ttl-Seconds", tc.ttl)
+				req.Header.Set(headerTokenTTL, tc.ttl)
 			}
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, req)
@@ -113,7 +113,7 @@ func TestAuthMiddleware_MissingToken(t *testing.T) {
 func TestAuthMiddleware_InvalidToken(t *testing.T) {
 	h := newTestHandler(t)
 	req := httptest.NewRequest(http.MethodGet, "/latest/meta-data/placement/region", nil)
-	req.Header.Set("X-Aws-Ec2-Metadata-Token", "invalid.token")
+	req.Header.Set(headerToken, "invalid.token")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
@@ -126,13 +126,13 @@ func TestAuthMiddleware_ExpiredToken(t *testing.T) {
 	other := newHandler("us-west-2", "OtherRole", otherLogger, testCreds())
 
 	req := httptest.NewRequest(http.MethodPut, "/latest/api/token", nil)
-	req.Header.Set("X-Aws-Ec2-Metadata-Token-Ttl-Seconds", "60")
+	req.Header.Set(headerTokenTTL, "60")
 	w := httptest.NewRecorder()
 	other.ServeHTTP(w, req)
 	foreignToken := w.Body.String()
 
 	req2 := httptest.NewRequest(http.MethodGet, "/latest/meta-data/placement/region", nil)
-	req2.Header.Set("X-Aws-Ec2-Metadata-Token", foreignToken)
+	req2.Header.Set(headerToken, foreignToken)
 	w2 := httptest.NewRecorder()
 	h.ServeHTTP(w2, req2)
 	assert.Equal(t, http.StatusUnauthorized, w2.Code)
@@ -145,7 +145,7 @@ func TestRegionEndpoint(t *testing.T) {
 	tok := getToken(t, h, 60)
 
 	req := httptest.NewRequest(http.MethodGet, "/latest/meta-data/placement/region", nil)
-	req.Header.Set("X-Aws-Ec2-Metadata-Token", tok)
+	req.Header.Set(headerToken, tok)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
@@ -160,7 +160,7 @@ func TestCredentialListingEndpoint(t *testing.T) {
 	tok := getToken(t, h, 60)
 
 	req := httptest.NewRequest(http.MethodGet, "/latest/meta-data/iam/security-credentials/", nil)
-	req.Header.Set("X-Aws-Ec2-Metadata-Token", tok)
+	req.Header.Set(headerToken, tok)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
@@ -175,7 +175,7 @@ func TestCredentialDetailEndpoint(t *testing.T) {
 	tok := getToken(t, h, 60)
 
 	req := httptest.NewRequest(http.MethodGet, "/latest/meta-data/iam/security-credentials/TestRole", nil)
-	req.Header.Set("X-Aws-Ec2-Metadata-Token", tok)
+	req.Header.Set(headerToken, tok)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
@@ -195,7 +195,7 @@ func TestCredentialDetailEndpoint_WrongRole(t *testing.T) {
 	tok := getToken(t, h, 60)
 
 	req := httptest.NewRequest(http.MethodGet, "/latest/meta-data/iam/security-credentials/WrongRole", nil)
-	req.Header.Set("X-Aws-Ec2-Metadata-Token", tok)
+	req.Header.Set(headerToken, tok)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 

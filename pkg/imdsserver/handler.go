@@ -13,6 +13,12 @@ import (
 	"github.com/justinas/alice"
 )
 
+const (
+	headerToken    = "X-Aws-Ec2-Metadata-Token"             //nolint:gosec // header name, not a credential
+	headerTokenTTL = "X-Aws-Ec2-Metadata-Token-Ttl-Seconds" //nolint:gosec // header name, not a credential
+	headerForward  = "X-Forwarded-For"
+)
+
 // CredentialProvider abstracts AWS credential retrieval.
 // In production, this is backed by the AWS SDK credential chain.
 // In tests, a mock implementation is injected.
@@ -69,12 +75,12 @@ func (h *imdsHandler) buildMux() http.Handler {
 
 // handleToken issues a new IMDSv2 session token.
 func (h *imdsHandler) handleToken(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("X-Forwarded-For") != "" {
+	if r.Header.Get(headerForward) != "" {
 		writeError(w, http.StatusUnauthorized, "InvalidHeader", "Token requests can't contain X-Forwarded-For")
 		return
 	}
 
-	ttlStr := r.Header.Get("X-Aws-Ec2-Metadata-Token-Ttl-Seconds")
+	ttlStr := r.Header.Get(headerTokenTTL)
 	if ttlStr == "" {
 		writeError(w, http.StatusUnauthorized, "MissingTTL", "The IMDSv2 token TTL header is missing")
 		return
@@ -88,7 +94,7 @@ func (h *imdsHandler) handleToken(w http.ResponseWriter, r *http.Request) {
 
 	encoded := h.tok.encode(time.Duration(ttlInt) * time.Second)
 	// Go SDK v2 requires the TTL header echoed back.
-	w.Header().Set("X-Aws-Ec2-Metadata-Token-Ttl-Seconds", ttlStr)
+	w.Header().Set(headerTokenTTL, ttlStr)
 	w.Header().Set("Content-Type", "text/plain")
 	_, _ = w.Write(encoded)
 }
@@ -96,7 +102,7 @@ func (h *imdsHandler) handleToken(w http.ResponseWriter, r *http.Request) {
 // requireToken is middleware that validates the IMDSv2 token on GET requests.
 func (h *imdsHandler) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tok := r.Header.Get("X-Aws-Ec2-Metadata-Token")
+		tok := r.Header.Get(headerToken)
 		if tok == "" {
 			writeError(w, http.StatusUnauthorized, "MissingToken", "The IMDSv2 token header is missing")
 			return
