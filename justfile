@@ -11,7 +11,8 @@ test:
 
 # Build the binary
 build:
-    go build ./cmd/imds-broker/...
+    mkdir -p dist
+    go build -o dist/ ./cmd/imds-broker/...
 
 # Run linter
 lint:
@@ -20,3 +21,7 @@ lint:
 # Run tests with verbose output
 test-v:
     go test -v ./...
+
+# Build a local snapshot release (no publish)
+release-snapshot:
+    goreleaser release --snapshot --clean
