@@ -22,6 +22,7 @@ Implementation plan: `plans/imds-broker.md`
 | Logging | `slog` with JSON handler |
 | MCP protocol | mark3labs/mcp-go (stdio transport only) |
 | AWS credentials | aws/aws-sdk-go-v2 |
+| Testing | stretchr/testify (`assert` + `require`) |
 | Linting | golangci-lint |
 | CI | GitHub Actions |
 
@@ -81,5 +82,6 @@ Use these when fetching documentation via the context7 MCP tool:
 | mark3labs/mcp-go | `/mark3labs/mcp-go` |
 | golangci-lint | `/golangci/golangci-lint` |
 | just (command runner) | `/casey/just` |
+| stretchr/testify | `/stretchr/testify` |
 
 > Note: justinas/alice is not indexed in context7. Refer to https://github.com/justinas/alice for usage.

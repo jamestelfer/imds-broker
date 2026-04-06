@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/jamestelfer/imds-broker/pkg/imdsserver"
 )
@@ -32,62 +34,44 @@ func newServerCreds() *staticCreds {
 	}
 }
 
-func TestServer_StartsAndResponds(t *testing.T) {
+func newTestServer(t *testing.T, bindAddrs ...string) *imdsserver.Server {
+	t.Helper()
+	if len(bindAddrs) == 0 {
+		bindAddrs = []string{"127.0.0.1:0"}
+	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv, err := imdsserver.New(imdsserver.Options{
 		Profile:       "test",
 		Region:        "us-east-1",
 		PrincipalName: "TestRole",
-		BindAddrs:     []string{"127.0.0.1:0"},
+		BindAddrs:     bindAddrs,
 		Logger:        logger,
 		Credentials:   newServerCreds(),
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	require.NoError(t, err)
+	return srv
+}
+
+func TestServer_StartsAndResponds(t *testing.T) {
+	srv := newTestServer(t)
 	defer srv.Stop()
 
 	urls := srv.URLs()
-	if len(urls) == 0 {
-		t.Fatal("expected at least one URL")
-	}
-	if len(urls) != 1 {
-		t.Fatalf("expected 1 URL for 1 bind addr, got %d", len(urls))
-	}
+	require.Len(t, urls, 1)
 
 	// The server should respond to HTTP requests.
-	url := urls[0]
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url+"/latest/meta-data/placement/region", nil)
-	if err != nil {
-		t.Fatalf("http.NewRequestWithContext: %v", err)
-	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, urls[0]+"/latest/meta-data/placement/region", nil)
+	require.NoError(t, err)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("client.Do: %v", err)
-	}
-	if err := resp.Body.Close(); err != nil {
-		t.Errorf("resp.Body.Close: %v", err)
-	}
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
 	// 401 because we didn't include a token — but the server is alive.
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("expected 401 (no token), got %d", resp.StatusCode)
-	}
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
 func TestServer_DoneClosesOnStop(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv, err := imdsserver.New(imdsserver.Options{
-		Profile:       "test",
-		Region:        "us-east-1",
-		PrincipalName: "TestRole",
-		BindAddrs:     []string{"127.0.0.1:0"},
-		Logger:        logger,
-		Credentials:   newServerCreds(),
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
+	srv := newTestServer(t)
 	srv.Stop()
 
 	select {
@@ -99,43 +83,16 @@ func TestServer_DoneClosesOnStop(t *testing.T) {
 }
 
 func TestServer_MultipleBindAddrs(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv, err := imdsserver.New(imdsserver.Options{
-		Profile:       "test",
-		Region:        "us-west-2",
-		PrincipalName: "TestRole",
-		BindAddrs:     []string{"127.0.0.1:0", "127.0.0.1:0"},
-		Logger:        logger,
-		Credentials:   newServerCreds(),
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	srv := newTestServer(t, "127.0.0.1:0", "127.0.0.1:0")
 	defer srv.Stop()
 
 	urls := srv.URLs()
-	if len(urls) != 2 {
-		t.Fatalf("expected 2 URLs for 2 bind addrs, got %d: %v", len(urls), urls)
-	}
-	if urls[0] == urls[1] {
-		t.Error("expected distinct URLs for distinct listeners")
-	}
+	require.Len(t, urls, 2)
+	assert.NotEqual(t, urls[0], urls[1])
 }
 
 func TestServer_StopIsIdempotent(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv, err := imdsserver.New(imdsserver.Options{
-		Profile:       "test",
-		Region:        "us-east-1",
-		PrincipalName: "TestRole",
-		BindAddrs:     []string{"127.0.0.1:0"},
-		Logger:        logger,
-		Credentials:   newServerCreds(),
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
+	srv := newTestServer(t)
 	srv.Stop()
 	srv.Stop() // must not panic
 

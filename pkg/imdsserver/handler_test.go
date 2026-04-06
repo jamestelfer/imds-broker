@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // fixedCredentials is a mock CredentialProvider for tests.
@@ -39,9 +41,7 @@ func newTestHandler(t *testing.T) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h, err := newHandler("test-profile", "us-east-1", "TestRole", logger, testCreds())
-	if err != nil {
-		t.Fatalf("newHandler: %v", err)
-	}
+	require.NoError(t, err)
 	return h
 }
 
@@ -52,9 +52,7 @@ func getToken(t *testing.T, h http.Handler, ttl int) string {
 	req.Header.Set("X-Aws-Ec2-Metadata-Token-Ttl-Seconds", fmt.Sprintf("%d", ttl))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 getting token, got %d: %s", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusOK, w.Code, "expected 200 getting token: %s", w.Body.String())
 	return w.Body.String()
 }
 
@@ -66,16 +64,11 @@ func TestPutToken_ValidTTL(t *testing.T) {
 	req.Header.Set("X-Aws-Ec2-Metadata-Token-Ttl-Seconds", "60")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if w.Body.Len() == 0 {
-		t.Fatal("expected non-empty token in response body")
-	}
-	// Response must echo back the TTL header (required by Go SDK v2)
-	if got := w.Header().Get("X-Aws-Ec2-Metadata-Token-Ttl-Seconds"); got != "60" {
-		t.Errorf("expected TTL header echo '60', got %q", got)
-	}
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotEmpty(t, w.Body.String())
+	// Response must echo back the TTL header (required by Go SDK v2).
+	assert.Equal(t, "60", w.Header().Get("X-Aws-Ec2-Metadata-Token-Ttl-Seconds"))
 }
 
 func TestPutToken_TTLBoundaries(t *testing.T) {
@@ -101,11 +94,10 @@ func TestPutToken_TTLBoundaries(t *testing.T) {
 			}
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, req)
-			if tc.wantOK && w.Code != http.StatusOK {
-				t.Errorf("ttl=%s: expected 200, got %d", tc.ttl, w.Code)
-			}
-			if !tc.wantOK && w.Code == http.StatusOK {
-				t.Errorf("ttl=%s: expected non-200, got 200", tc.ttl)
+			if tc.wantOK {
+				assert.Equal(t, http.StatusOK, w.Code)
+			} else {
+				assert.NotEqual(t, http.StatusOK, w.Code)
 			}
 		})
 	}
@@ -124,9 +116,7 @@ func TestAuthMiddleware_MissingToken(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, req)
-			if w.Code != http.StatusUnauthorized {
-				t.Errorf("expected 401, got %d", w.Code)
-			}
+			assert.Equal(t, http.StatusUnauthorized, w.Code)
 		})
 	}
 }
@@ -137,20 +127,16 @@ func TestAuthMiddleware_InvalidToken(t *testing.T) {
 	req.Header.Set("X-Aws-Ec2-Metadata-Token", "invalid.token")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", w.Code)
-	}
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
 func TestAuthMiddleware_ExpiredToken(t *testing.T) {
 	h := newTestHandler(t)
-	// We can't easily create an expired token from the outside since the token
-	// secret is internal. Use a token from a different handler instance (wrong secret).
+	// Use a token from a different handler instance (different secret) to simulate rejection.
 	otherLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	other, err := newHandler("other", "us-west-2", "OtherRole", otherLogger, testCreds())
-	if err != nil {
-		t.Fatalf("newHandler: %v", err)
-	}
+	require.NoError(t, err)
+
 	req := httptest.NewRequest(http.MethodPut, "/latest/api/token", nil)
 	req.Header.Set("X-Aws-Ec2-Metadata-Token-Ttl-Seconds", "60")
 	w := httptest.NewRecorder()
@@ -161,9 +147,7 @@ func TestAuthMiddleware_ExpiredToken(t *testing.T) {
 	req2.Header.Set("X-Aws-Ec2-Metadata-Token", foreignToken)
 	w2 := httptest.NewRecorder()
 	h.ServeHTTP(w2, req2)
-	if w2.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for foreign token, got %d", w2.Code)
-	}
+	assert.Equal(t, http.StatusUnauthorized, w2.Code)
 }
 
 // --- Region endpoint ---
@@ -177,12 +161,8 @@ func TestRegionEndpoint(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if got := w.Body.String(); got != "us-east-1" {
-		t.Errorf("expected region 'us-east-1', got %q", got)
-	}
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "us-east-1", w.Body.String())
 }
 
 // --- Credential listing endpoint ---
@@ -196,12 +176,8 @@ func TestCredentialListingEndpoint(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if got := w.Body.String(); got != "TestRole" {
-		t.Errorf("expected principal name 'TestRole', got %q", got)
-	}
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "TestRole", w.Body.String())
 }
 
 // --- Credential detail endpoint ---
@@ -215,29 +191,15 @@ func TestCredentialDetailEndpoint(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	var resp credentialResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-	if resp.Code != "Success" {
-		t.Errorf("expected Code='Success', got %q", resp.Code)
-	}
-	if resp.AccessKeyID != "AKIAIOSFODNN7EXAMPLE" {
-		t.Errorf("unexpected AccessKeyId: %q", resp.AccessKeyID)
-	}
-	if resp.SecretAccessKey != "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" {
-		t.Errorf("unexpected SecretAccessKey")
-	}
-	if resp.Token == "" {
-		t.Error("expected non-empty Token")
-	}
-	if resp.Expiration == "" {
-		t.Error("expected non-empty Expiration")
-	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, "Success", resp.Code)
+	assert.Equal(t, "AKIAIOSFODNN7EXAMPLE", resp.AccessKeyID)
+	assert.Equal(t, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", resp.SecretAccessKey)
+	assert.NotEmpty(t, resp.Token)
+	assert.NotEmpty(t, resp.Expiration)
 }
 
 func TestCredentialDetailEndpoint_WrongRole(t *testing.T) {
@@ -249,7 +211,5 @@ func TestCredentialDetailEndpoint_WrongRole(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
