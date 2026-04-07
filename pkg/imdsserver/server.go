@@ -25,8 +25,7 @@ type Options struct {
 	// startup. Tests supply a fixed string.
 	PrincipalName string
 	// BindAddrs is the list of "host:port" addresses to listen on. Port 0
-	// selects an ephemeral port. The first entry is always 127.0.0.1; the
-	// optional second entry is the Docker gateway IP.
+	// selects an ephemeral port.
 	BindAddrs []string
 	// Logger is used for request and error logging.
 	Logger *slog.Logger

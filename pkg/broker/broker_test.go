@@ -51,36 +51,17 @@ func fakeFactory(servers map[string]*fakeServer) broker.ServerFactory {
 	}
 }
 
-// fakeExecutor implements CommandExecutor for Docker discovery tests.
-type fakeExecutor struct {
-	output []byte
-	err    error
-}
-
-func (f *fakeExecutor) Execute(_ context.Context, _ string, _ ...string) ([]byte, error) {
-	return f.output, f.err
-}
-
-func noDockerExecutor() *fakeExecutor {
-	return &fakeExecutor{err: errors.New("docker: not found")}
-}
-
-func dockerExecutor(gatewayIP string) *fakeExecutor {
-	return &fakeExecutor{output: []byte(gatewayIP + "\n")}
-}
-
 // discardLogger returns a no-op slog logger.
 func discardLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
-// newTestBroker creates a Broker wired with the given executor and factory.
+// newTestBroker creates a Broker wired with the given factory.
 // It fails the test immediately if New returns an error.
-func newTestBroker(t *testing.T, exec broker.CommandExecutor, factory broker.ServerFactory) *broker.Broker {
+func newTestBroker(t *testing.T, factory broker.ServerFactory) *broker.Broker {
 	t.Helper()
 	b, err := broker.New(context.Background(), broker.Options{
 		Logger:        discardLogger(),
-		Executor:      exec,
 		ServerFactory: factory,
 	})
 	require.NoError(t, err)
@@ -92,13 +73,12 @@ func newTestBroker(t *testing.T, exec broker.CommandExecutor, factory broker.Ser
 // Test 1 (tracer bullet): CreateServer returns the server's localhost URL.
 func TestCreateServer_ReturnsLocalURL(t *testing.T) {
 	srv := newFakeServer("http://127.0.0.1:12345")
-	b := newTestBroker(t, noDockerExecutor(), fakeFactory(map[string]*fakeServer{"prod:us-east-1": srv}))
+	b := newTestBroker(t, fakeFactory(map[string]*fakeServer{"prod:us-east-1": srv}))
 
 	result, err := b.CreateServer(context.Background(), "prod", "us-east-1")
 
 	require.NoError(t, err)
 	assert.Equal(t, "http://127.0.0.1:12345", result.LocalURL)
-	assert.Empty(t, result.DockerURL)
 }
 
 // Test 2: CreateServer with same profile+region returns the same server (deduplication).
@@ -109,7 +89,7 @@ func TestCreateServer_Deduplication(t *testing.T) {
 		calls++
 		return srv, nil
 	}
-	b := newTestBroker(t, noDockerExecutor(), factory)
+	b := newTestBroker(t, factory)
 
 	r1, err := b.CreateServer(context.Background(), "prod", "us-east-1")
 	require.NoError(t, err)
@@ -133,7 +113,7 @@ func TestCreateServer_ReplacesCrashedServer(t *testing.T) {
 		}
 		return second, nil
 	}
-	b := newTestBroker(t, noDockerExecutor(), factory)
+	b := newTestBroker(t, factory)
 
 	r1, err := b.CreateServer(context.Background(), "prod", "us-east-1")
 	require.NoError(t, err)
@@ -151,7 +131,7 @@ func TestCreateServer_ReplacesCrashedServer(t *testing.T) {
 // Test 4: StopServer stops the server and removes it from the registry.
 func TestStopServer_ByLocalURL(t *testing.T) {
 	srv := newFakeServer("http://127.0.0.1:12345")
-	b := newTestBroker(t, noDockerExecutor(), fakeFactory(map[string]*fakeServer{"prod:us-east-1": srv}))
+	b := newTestBroker(t, fakeFactory(map[string]*fakeServer{"prod:us-east-1": srv}))
 
 	_, err := b.CreateServer(context.Background(), "prod", "us-east-1")
 	require.NoError(t, err)
@@ -169,7 +149,7 @@ func TestStopServer_ByLocalURL(t *testing.T) {
 
 // Test 5: StopServer with an unknown URL returns an error.
 func TestStopServer_UnknownURL_ReturnsError(t *testing.T) {
-	b := newTestBroker(t, noDockerExecutor(), fakeFactory(nil))
+	b := newTestBroker(t, fakeFactory(nil))
 
 	err := b.StopServer(context.Background(), "http://127.0.0.1:99999")
 	require.Error(t, err)
@@ -187,7 +167,7 @@ func TestStopServer_AllowsReuseOfKey(t *testing.T) {
 		}
 		return second, nil
 	}
-	b := newTestBroker(t, noDockerExecutor(), factory)
+	b := newTestBroker(t, factory)
 
 	r1, err := b.CreateServer(context.Background(), "prod", "us-east-1")
 	require.NoError(t, err)
@@ -203,51 +183,31 @@ func TestStopServer_AllowsReuseOfKey(t *testing.T) {
 
 // Test 7: Factory returning an error propagates to the caller.
 func TestCreateServer_FactoryError_PropagatesError(t *testing.T) {
-	b := newTestBroker(t, noDockerExecutor(), fakeFactory(nil)) // empty map → always errors
+	b := newTestBroker(t, fakeFactory(nil)) // empty map → always errors
 
 	_, err := b.CreateServer(context.Background(), "nonexistent", "us-east-1")
 	require.Error(t, err)
 }
 
-// Test 8: Always binds to 0.0.0.0 regardless of docker gateway discovery.
-func TestCreateServer_AlwaysBindsToAllInterfaces(t *testing.T) {
+// Test 8: CreateServer always binds to 0.0.0.0.
+func TestCreateServer_BindsToAllInterfaces(t *testing.T) {
 	var capturedBindAddrs []string
 	srv := newFakeServer("http://127.0.0.1:11111")
 	factory := func(_ context.Context, _, _ string, bindAddrs []string, _ *slog.Logger) (broker.Server, error) {
 		capturedBindAddrs = bindAddrs
 		return srv, nil
 	}
-	b := newTestBroker(t, dockerExecutor("172.17.0.1"), factory)
+	b := newTestBroker(t, factory)
 
 	result, err := b.CreateServer(context.Background(), "prod", "us-east-1")
 	require.NoError(t, err)
 
 	assert.Equal(t, "http://127.0.0.1:11111", result.LocalURL)
-	assert.Empty(t, result.DockerURL)
 	require.Len(t, capturedBindAddrs, 1)
 	assert.Equal(t, "0.0.0.0:0", capturedBindAddrs[0])
 }
 
-// Test 9: Binds to 0.0.0.0 when docker gateway is absent.
-func TestCreateServer_NoDockerGateway_BindsToAllInterfaces(t *testing.T) {
-	var capturedBindAddrs []string
-	srv := newFakeServer("http://127.0.0.1:11111")
-	factory := func(_ context.Context, _, _ string, bindAddrs []string, _ *slog.Logger) (broker.Server, error) {
-		capturedBindAddrs = bindAddrs
-		return srv, nil
-	}
-	b := newTestBroker(t, noDockerExecutor(), factory)
-
-	result, err := b.CreateServer(context.Background(), "prod", "us-east-1")
-	require.NoError(t, err)
-
-	assert.Equal(t, "http://127.0.0.1:11111", result.LocalURL)
-	assert.Empty(t, result.DockerURL)
-	require.Len(t, capturedBindAddrs, 1)
-	assert.Equal(t, "0.0.0.0:0", capturedBindAddrs[0])
-}
-
-// Test 11: StopAll stops every running server and clears the registry.
+// Test 9: StopAll stops every running server and clears the registry.
 func TestStopAll_StopsAllServers(t *testing.T) {
 	srv1 := newFakeServer("http://127.0.0.1:11111")
 	srv2 := newFakeServer("http://127.0.0.1:22222")
@@ -259,7 +219,7 @@ func TestStopAll_StopsAllServers(t *testing.T) {
 		}
 		return srv2, nil
 	}
-	b := newTestBroker(t, noDockerExecutor(), factory)
+	b := newTestBroker(t, factory)
 
 	_, err := b.CreateServer(context.Background(), "prod", "us-east-1")
 	require.NoError(t, err)

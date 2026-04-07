@@ -117,9 +117,8 @@ func createServerTool() mcp.Tool {
 
 // serverURLs is the JSON shape returned by create_server.
 type serverURLs struct {
-	LocalURL  string `json:"local_url"`
-	DockerURL string `json:"docker_url,omitempty"`
-	Port      string `json:"port"`
+	LocalURL string `json:"local_url"`
+	Port     string `json:"port"`
 }
 
 // createServerHandler returns a handler that starts (or returns) an IMDS server.
@@ -137,7 +136,7 @@ func createServerHandler(b BrokerFace, logger *slog.Logger) mcplib.ToolHandlerFu
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		urls := serverURLs{LocalURL: result.LocalURL, DockerURL: result.DockerURL, Port: portFromURL(result.LocalURL)}
+		urls := serverURLs{LocalURL: result.LocalURL, Port: portFromURL(result.LocalURL)}
 		out, err := json.Marshal(urls)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("marshal: %v", err)), nil
@@ -152,7 +151,7 @@ func stopServerTool() mcp.Tool {
 		mcp.WithDescription("Stop a running IMDS server"),
 		mcp.WithString("url",
 			mcp.Required(),
-			mcp.Description("The local or Docker URL of the server to stop"),
+			mcp.Description("The local URL of the server to stop"),
 		),
 	)
 }
