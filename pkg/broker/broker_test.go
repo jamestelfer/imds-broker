@@ -24,7 +24,7 @@ func newFakeServer(urls ...string) *fakeServer {
 
 func (f *fakeServer) URLs() []string { return f.urls }
 
-func (f *fakeServer) Stop()  { f.closeDone() }
+func (f *fakeServer) Stop()                 { f.closeDone() }
 func (f *fakeServer) Done() <-chan struct{} { return f.done }
 
 // crash simulates an unexpected server crash (done closes without Stop being called).
@@ -209,12 +209,10 @@ func TestCreateServer_FactoryError_PropagatesError(t *testing.T) {
 	require.Error(t, err)
 }
 
-// Test 8: Docker gateway discovery succeeds → server gets two URLs, DockerURL returned.
-func TestCreateServer_DockerGateway_ReturnsBothURLs(t *testing.T) {
-	// The broker passes two bind addresses when gateway is discovered.
-	// The fake server returns two URLs: localhost and gateway.
+// Test 8: Always binds to 0.0.0.0 regardless of docker gateway discovery.
+func TestCreateServer_AlwaysBindsToAllInterfaces(t *testing.T) {
 	var capturedBindAddrs []string
-	srv := newFakeServer("http://127.0.0.1:11111", "http://172.17.0.1:22222")
+	srv := newFakeServer("http://127.0.0.1:11111")
 	factory := func(_ context.Context, _, _ string, bindAddrs []string, _ *slog.Logger) (broker.Server, error) {
 		capturedBindAddrs = bindAddrs
 		return srv, nil
@@ -225,14 +223,13 @@ func TestCreateServer_DockerGateway_ReturnsBothURLs(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "http://127.0.0.1:11111", result.LocalURL)
-	assert.Equal(t, "http://host.docker.internal:22222", result.DockerURL)
-	require.Len(t, capturedBindAddrs, 2)
-	assert.Equal(t, "127.0.0.1:0", capturedBindAddrs[0])
-	assert.Equal(t, "172.17.0.1:0", capturedBindAddrs[1])
+	assert.Empty(t, result.DockerURL)
+	require.Len(t, capturedBindAddrs, 1)
+	assert.Equal(t, "0.0.0.0:0", capturedBindAddrs[0])
 }
 
-// Test 9: Docker gateway discovery fails → only localhost URL returned.
-func TestCreateServer_NoDockerGateway_OnlyLocalURL(t *testing.T) {
+// Test 9: Binds to 0.0.0.0 when docker gateway is absent.
+func TestCreateServer_NoDockerGateway_BindsToAllInterfaces(t *testing.T) {
 	var capturedBindAddrs []string
 	srv := newFakeServer("http://127.0.0.1:11111")
 	factory := func(_ context.Context, _, _ string, bindAddrs []string, _ *slog.Logger) (broker.Server, error) {
@@ -247,7 +244,7 @@ func TestCreateServer_NoDockerGateway_OnlyLocalURL(t *testing.T) {
 	assert.Equal(t, "http://127.0.0.1:11111", result.LocalURL)
 	assert.Empty(t, result.DockerURL)
 	require.Len(t, capturedBindAddrs, 1)
-	assert.Equal(t, "127.0.0.1:0", capturedBindAddrs[0])
+	assert.Equal(t, "0.0.0.0:0", capturedBindAddrs[0])
 }
 
 // Test 11: StopAll stops every running server and clears the registry.
@@ -280,25 +277,5 @@ func TestStopAll_StopsAllServers(t *testing.T) {
 	case <-srv2.Done(): // stopped
 	default:
 		t.Fatal("expected srv2 to be stopped")
-	}
-}
-
-// Test 10: StopServer by DockerURL also works (URL index includes Docker URL).
-func TestStopServer_ByDockerURL(t *testing.T) {
-	srv := newFakeServer("http://127.0.0.1:11111", "http://172.17.0.1:22222")
-	b := newTestBroker(t, dockerExecutor("172.17.0.1"), fakeFactory(map[string]*fakeServer{"prod:us-east-1": srv}))
-
-	result, err := b.CreateServer(context.Background(), "prod", "us-east-1")
-	require.NoError(t, err)
-	require.NotEmpty(t, result.DockerURL)
-
-	err = b.StopServer(context.Background(), result.DockerURL)
-	require.NoError(t, err)
-
-	select {
-	case <-srv.Done():
-		// stopped
-	default:
-		t.Fatal("expected server to be stopped")
 	}
 }

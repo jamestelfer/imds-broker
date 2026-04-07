@@ -68,7 +68,11 @@ func New(opts Options) (*Server, error) {
 
 	urls := make([]string, len(listeners))
 	for i, ln := range listeners {
-		urls[i] = "http://" + ln.Addr().String()
+		addr := ln.Addr().String()
+		if host, port, err := net.SplitHostPort(addr); err == nil && host == "0.0.0.0" {
+			addr = net.JoinHostPort("127.0.0.1", port)
+		}
+		urls[i] = "http://" + addr
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
