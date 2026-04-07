@@ -98,6 +98,7 @@ func TestAuthMiddleware_MissingToken(t *testing.T) {
 	h := newTestHandler(t)
 	for _, path := range []string{
 		"/latest/meta-data/placement/region",
+		"/latest/meta-data/placement/availability-zone/",
 		"/latest/meta-data/iam/security-credentials/",
 		"/latest/meta-data/iam/security-credentials/TestRole",
 	} {
@@ -136,6 +137,21 @@ func TestAuthMiddleware_ExpiredToken(t *testing.T) {
 	w2 := httptest.NewRecorder()
 	h.ServeHTTP(w2, req2)
 	assert.Equal(t, http.StatusUnauthorized, w2.Code)
+}
+
+// --- Availability zone endpoint ---
+
+func TestAvailabilityZoneEndpoint(t *testing.T) {
+	h := newTestHandler(t)
+	tok := getToken(t, h, 60)
+
+	req := httptest.NewRequest(http.MethodGet, "/latest/meta-data/placement/availability-zone/", nil)
+	req.Header.Set(headerToken, tok)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "us-east-1a", w.Body.String())
 }
 
 // --- Region endpoint ---

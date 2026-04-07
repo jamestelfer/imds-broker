@@ -67,6 +67,7 @@ func (h *imdsHandler) buildMux() http.Handler {
 
 	protected := alice.New(h.requireToken)
 	mux.Handle("GET /latest/meta-data/placement/region", protected.ThenFunc(h.handleRegion))
+	mux.Handle("GET /latest/meta-data/placement/availability-zone/", protected.ThenFunc(h.handleAvailabilityZone))
 	mux.Handle("GET /latest/meta-data/iam/security-credentials/", protected.ThenFunc(h.handleCredentialList))
 	mux.Handle("GET /latest/meta-data/iam/security-credentials/{role}", protected.ThenFunc(h.handleCredentialDetail))
 
@@ -127,6 +128,11 @@ func (h *imdsHandler) logRequest(next http.Handler) http.Handler {
 			"client", r.RemoteAddr,
 		)
 	})
+}
+
+func (h *imdsHandler) handleAvailabilityZone(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = io.WriteString(w, h.region+"a")
 }
 
 func (h *imdsHandler) handleRegion(w http.ResponseWriter, _ *http.Request) {
