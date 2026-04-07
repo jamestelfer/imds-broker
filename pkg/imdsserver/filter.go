@@ -1,6 +1,7 @@
 package imdsserver
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"time"
@@ -39,11 +40,11 @@ func excludeSubnet(nets []*net.IPNet, ip net.IP) []*net.IPNet {
 // defaultRouteIP returns the local IP used for outbound traffic by performing
 // a UDP "connect" (no packets are sent — this is a local routing table lookup).
 func defaultRouteIP() (net.IP, error) {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
+	conn, err := (&net.Dialer{}).DialContext(context.Background(), "udp", "8.8.8.8:80")
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return conn.LocalAddr().(*net.UDPAddr).IP, nil
 }
 
@@ -64,13 +65,12 @@ func buildAllowList() ([]*net.IPNet, error) {
 		}
 	}
 
-	outbound, err := defaultRouteIP()
-	if err != nil {
-		// No default route — allow all local subnets.
-		return nets, nil
+	// If the default-route lookup fails, fall back to allowing all local subnets
+	// rather than rejecting everything (req 12).
+	if outbound, err := defaultRouteIP(); err == nil {
+		return excludeSubnet(nets, outbound), nil
 	}
-
-	return excludeSubnet(nets, outbound), nil
+	return nets, nil
 }
 
 // filteredListener wraps a net.Listener to reject connections from IPs not in
@@ -85,7 +85,7 @@ type filteredListener struct {
 func newFilteredListener(ln net.Listener, logger *slog.Logger) *filteredListener {
 	return &filteredListener{
 		Listener:  ln,
-		allowList: NewCached[[]*net.IPNet](time.Minute, buildAllowList),
+		allowList: NewCached(time.Minute, buildAllowList),
 		logger:    logger,
 	}
 }
@@ -101,14 +101,14 @@ func (fl *filteredListener) Accept() (net.Conn, error) {
 		if err != nil {
 			fl.logger.Warn("connection filter: unparseable remote address",
 				"addr", conn.RemoteAddr())
-			conn.Close()
+			_ = conn.Close()
 			continue
 		}
 
 		ip := net.ParseIP(host)
 		if ip == nil {
 			fl.logger.Warn("connection filter: unparseable remote IP", "addr", host)
-			conn.Close()
+			_ = conn.Close()
 			continue
 		}
 
@@ -116,13 +116,13 @@ func (fl *filteredListener) Accept() (net.Conn, error) {
 		if err != nil {
 			fl.logger.Error("connection filter: interface enumeration failed; rejecting connection",
 				"remote", host, "error", err)
-			conn.Close()
+			_ = conn.Close()
 			continue
 		}
 
 		if !isAllowedIP(ip, nets) {
 			fl.logger.Warn("connection filter: rejected non-local connection", "remote", host)
-			conn.Close()
+			_ = conn.Close()
 			continue
 		}
 

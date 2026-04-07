@@ -55,7 +55,7 @@ func New(opts Options) (*Server, error) {
 	lc := &net.ListenConfig{}
 	listeners := make([]net.Listener, 0, len(opts.BindAddrs))
 	for _, addr := range opts.BindAddrs {
-		ln, err := lc.Listen(context.Background(), "tcp", addr)
+		rawLn, err := lc.Listen(context.Background(), "tcp", addr)
 		if err != nil {
 			// Close listeners already opened before returning.
 			for _, l := range listeners {
@@ -65,7 +65,7 @@ func New(opts Options) (*Server, error) {
 			}
 			return nil, fmt.Errorf("imdsserver: listen on %s: %w", addr, err)
 		}
-		listeners = append(listeners, ln)
+		listeners = append(listeners, newFilteredListener(rawLn, opts.Logger))
 	}
 
 	urls := make([]string, len(listeners))
