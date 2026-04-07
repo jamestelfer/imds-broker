@@ -125,13 +125,10 @@ func TestListProfiles_EmptyResult_ReturnsEmptyArray(t *testing.T) {
 	assert.Empty(t, profs)
 }
 
-// Test 3: create_server returns local URL and docker URL when both are present.
-func TestCreateServer_ReturnsBothURLs(t *testing.T) {
+// Test 3: create_server returns local URL and port.
+func TestCreateServer_ReturnsLocalURLAndPort(t *testing.T) {
 	b := &fakeBroker{
-		createResult: broker.CreateResult{
-			LocalURL:  "http://127.0.0.1:12345",
-			DockerURL: "http://host.docker.internal:12345",
-		},
+		createResult: broker.CreateResult{LocalURL: "http://127.0.0.1:12345"},
 	}
 	s := mcpserver.New(mcpserver.Options{
 		Broker:       b,
@@ -148,31 +145,11 @@ func TestCreateServer_ReturnsBothURLs(t *testing.T) {
 	require.False(t, result.IsError)
 	text := firstText(t, result)
 	assert.Contains(t, text, "http://127.0.0.1:12345")
-	assert.Contains(t, text, "http://host.docker.internal:12345")
 	assert.Contains(t, text, `"port":"12345"`)
-}
-
-// Test 4: create_server with no docker gateway returns only local URL.
-func TestCreateServer_NoDocker_ReturnsLocalURLOnly(t *testing.T) {
-	b := &fakeBroker{
-		createResult: broker.CreateResult{LocalURL: "http://127.0.0.1:12345"},
-	}
-	s := mcpserver.New(mcpserver.Options{
-		Broker:       b,
-		ListProfiles: func(_ context.Context, _ string) ([]profiles.Profile, error) { return nil, nil },
-		Logger:       discardLogger(),
-	})
-	c := newTestClient(t, s)
-
-	result := callTool(t, c, "create_server", map[string]any{"profile": "prod"})
-
-	require.False(t, result.IsError)
-	text := firstText(t, result)
-	assert.Contains(t, text, "http://127.0.0.1:12345")
 	assert.NotContains(t, text, "docker")
 }
 
-// Test 5: stop_server returns success for a known URL.
+// Test 4: stop_server returns success for a known URL.
 func TestStopServer_KnownURL_ReturnsSuccess(t *testing.T) {
 	b := &fakeBroker{}
 	s := mcpserver.New(mcpserver.Options{
