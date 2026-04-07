@@ -89,3 +89,4 @@ Use these when fetching documentation via the context7 MCP tool:
 | just (command runner) | `/casey/just` |
 | stretchr/testify | `/stretchr/testify` |
 | justinas/alice | `/justinas/alice` |
+| gopkg.in/ini.v1 | `/go-ini/ini` |
