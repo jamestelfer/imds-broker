@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net"
+	"net/url"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	mcplib "github.com/mark3labs/mcp-go/server"
@@ -117,6 +119,7 @@ func createServerTool() mcp.Tool {
 type serverURLs struct {
 	LocalURL  string `json:"local_url"`
 	DockerURL string `json:"docker_url,omitempty"`
+	Port      string `json:"port"`
 }
 
 // createServerHandler returns a handler that starts (or returns) an IMDS server.
@@ -134,7 +137,7 @@ func createServerHandler(b BrokerFace, logger *slog.Logger) mcplib.ToolHandlerFu
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		urls := serverURLs{LocalURL: result.LocalURL, DockerURL: result.DockerURL}
+		urls := serverURLs{LocalURL: result.LocalURL, DockerURL: result.DockerURL, Port: portFromURL(result.LocalURL)}
 		out, err := json.Marshal(urls)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("marshal: %v", err)), nil
@@ -168,4 +171,18 @@ func stopServerHandler(b BrokerFace, logger *slog.Logger) mcplib.ToolHandlerFunc
 		}
 		return mcp.NewToolResultText("stopped"), nil
 	}
+}
+
+// portFromURL extracts the port from a URL string (e.g. "http://127.0.0.1:8080" → "8080").
+// Returns an empty string if the URL is malformed or has no explicit port.
+func portFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	_, port, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		return ""
+	}
+	return port
 }
