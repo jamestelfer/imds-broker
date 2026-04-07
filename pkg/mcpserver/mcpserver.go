@@ -13,10 +13,11 @@ import (
 	mcplib "github.com/mark3labs/mcp-go/server"
 
 	"github.com/jamestelfer/imds-broker/pkg/broker"
+	"github.com/jamestelfer/imds-broker/pkg/profiles"
 )
 
 // ProfileLister is the signature of profiles.List.
-type ProfileLister func(ctx context.Context, filter string) ([]string, error)
+type ProfileLister func(ctx context.Context, filter string) ([]profiles.Profile, error)
 
 // BrokerFace is the broker subset required by the MCP server.
 type BrokerFace interface {
@@ -88,7 +89,7 @@ func listProfilesHandler(lister ProfileLister, filter string, logger *slog.Logge
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if names == nil {
-			names = []string{}
+			names = []profiles.Profile{}
 		}
 		b, err := json.Marshal(names)
 		if err != nil {
