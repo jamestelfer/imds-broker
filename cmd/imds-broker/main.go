@@ -296,7 +296,7 @@ func serveCommand() *cli.Command {
 				Region:        cfg.Region,
 				PrincipalName: identity.PrincipalName,
 				AccountID:     identity.AccountID,
-				BindAddrs:     []string{"127.0.0.1:0"},
+				BindAddrs:     []string{"0.0.0.0:0"},
 				Logger:        logger,
 				Credentials:   creds,
 			})
