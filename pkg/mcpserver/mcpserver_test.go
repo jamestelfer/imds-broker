@@ -13,6 +13,7 @@ import (
 
 	"github.com/jamestelfer/imds-broker/pkg/broker"
 	"github.com/jamestelfer/imds-broker/pkg/mcpserver"
+	"github.com/jamestelfer/imds-broker/pkg/profiles"
 )
 
 // ---- test doubles ----
@@ -78,10 +79,13 @@ func firstText(t *testing.T, result *mcp.CallToolResult) string {
 
 // ---- tests ----
 
-// Test 1 (tracer bullet): list_profiles returns a JSON array of profile names.
+// Test 1 (tracer bullet): list_profiles returns a JSON array of profile objects.
 func TestListProfiles_ReturnsMatchingProfiles(t *testing.T) {
-	lister := func(_ context.Context, _ string) ([]string, error) {
-		return []string{"dev-ReadOnly", "prod-ReadOnly"}, nil
+	lister := func(_ context.Context, _ string) ([]profiles.Profile, error) {
+		return []profiles.Profile{
+			{Name: "dev-ReadOnly", AccountID: "111122223333", Region: "us-east-1"},
+			{Name: "prod-ReadOnly", AccountID: "444455556666", Region: "ap-southeast-2"},
+		}, nil
 	}
 	s := mcpserver.New(mcpserver.Options{
 		Broker:        &fakeBroker{},
@@ -94,12 +98,15 @@ func TestListProfiles_ReturnsMatchingProfiles(t *testing.T) {
 	result := callTool(t, c, "list_profiles", nil)
 
 	require.False(t, result.IsError)
-	assert.JSONEq(t, `["dev-ReadOnly","prod-ReadOnly"]`, firstText(t, result))
+	assert.JSONEq(t, `[
+		{"name":"dev-ReadOnly","account_id":"111122223333","region":"us-east-1"},
+		{"name":"prod-ReadOnly","account_id":"444455556666","region":"ap-southeast-2"}
+	]`, firstText(t, result))
 }
 
 // Test 2: list_profiles with empty result returns empty JSON array.
 func TestListProfiles_EmptyResult_ReturnsEmptyArray(t *testing.T) {
-	lister := func(_ context.Context, _ string) ([]string, error) {
+	lister := func(_ context.Context, _ string) ([]profiles.Profile, error) {
 		return nil, nil
 	}
 	s := mcpserver.New(mcpserver.Options{
@@ -113,9 +120,9 @@ func TestListProfiles_EmptyResult_ReturnsEmptyArray(t *testing.T) {
 
 	require.False(t, result.IsError)
 	text := firstText(t, result)
-	var names []string
-	require.NoError(t, json.Unmarshal([]byte(text), &names))
-	assert.Empty(t, names)
+	var profs []profiles.Profile
+	require.NoError(t, json.Unmarshal([]byte(text), &profs))
+	assert.Empty(t, profs)
 }
 
 // Test 3: create_server returns local URL and docker URL when both are present.
@@ -128,7 +135,7 @@ func TestCreateServer_ReturnsBothURLs(t *testing.T) {
 	}
 	s := mcpserver.New(mcpserver.Options{
 		Broker:       b,
-		ListProfiles: func(_ context.Context, _ string) ([]string, error) { return nil, nil },
+		ListProfiles: func(_ context.Context, _ string) ([]profiles.Profile, error) { return nil, nil },
 		Logger:       discardLogger(),
 	})
 	c := newTestClient(t, s)
@@ -151,7 +158,7 @@ func TestCreateServer_NoDocker_ReturnsLocalURLOnly(t *testing.T) {
 	}
 	s := mcpserver.New(mcpserver.Options{
 		Broker:       b,
-		ListProfiles: func(_ context.Context, _ string) ([]string, error) { return nil, nil },
+		ListProfiles: func(_ context.Context, _ string) ([]profiles.Profile, error) { return nil, nil },
 		Logger:       discardLogger(),
 	})
 	c := newTestClient(t, s)
@@ -169,7 +176,7 @@ func TestStopServer_KnownURL_ReturnsSuccess(t *testing.T) {
 	b := &fakeBroker{}
 	s := mcpserver.New(mcpserver.Options{
 		Broker:       b,
-		ListProfiles: func(_ context.Context, _ string) ([]string, error) { return nil, nil },
+		ListProfiles: func(_ context.Context, _ string) ([]profiles.Profile, error) { return nil, nil },
 		Logger:       discardLogger(),
 	})
 	c := newTestClient(t, s)
@@ -185,7 +192,7 @@ func TestStopServer_UnknownURL_ReturnsErrorResult(t *testing.T) {
 	b := &fakeBroker{stopErr: assert.AnError}
 	s := mcpserver.New(mcpserver.Options{
 		Broker:       b,
-		ListProfiles: func(_ context.Context, _ string) ([]string, error) { return nil, nil },
+		ListProfiles: func(_ context.Context, _ string) ([]profiles.Profile, error) { return nil, nil },
 		Logger:       discardLogger(),
 	})
 	c := newTestClient(t, s)

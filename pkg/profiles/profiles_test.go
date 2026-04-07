@@ -50,7 +50,10 @@ region = us-east-1
 
 	result, err := profiles.List(context.Background(), "")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"dev-ViewOnly", "prod-ReadOnly"}, result)
+	assert.Equal(t, []profiles.Profile{
+		{Name: "dev-ViewOnly", Region: "us-east-1"},
+		{Name: "prod-ReadOnly", Region: "us-east-1"},
+	}, result)
 }
 
 // Test 2: List with custom filter returns only matching profiles.
@@ -68,7 +71,10 @@ region = us-east-1
 
 	result, err := profiles.List(context.Background(), "admin")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"admin", "staging-admin"}, result)
+	assert.Equal(t, []profiles.Profile{
+		{Name: "admin", Region: "us-east-1"},
+		{Name: "staging-admin", Region: "us-east-1"},
+	}, result)
 }
 
 // Test 3: Empty config returns empty list without error.
@@ -106,7 +112,10 @@ aws_secret_access_key = secret
 
 	result, err := profiles.List(context.Background(), "ReadOnly")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"dev-ReadOnly", "prod-ReadOnly"}, result)
+	assert.Equal(t, []profiles.Profile{
+		{Name: "dev-ReadOnly"},
+		{Name: "prod-ReadOnly", Region: "us-east-1"},
+	}, result)
 }
 
 // Test 6: [default] section does not match the default filter.
@@ -132,6 +141,34 @@ func TestList_MissingFiles_ReturnsEmpty(t *testing.T) {
 	assert.Empty(t, result)
 }
 
+// Test 9: Account ID is extracted from role_arn when present.
+func TestList_AccountIDFromRoleARN(t *testing.T) {
+	writeConfig(t, `
+[profile prod-ReadOnly]
+region = ap-southeast-2
+role_arn = arn:aws:iam::123456789012:role/ReadOnly
+`)
+
+	result, err := profiles.List(context.Background(), "ReadOnly")
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, "123456789012", result[0].AccountID)
+}
+
+// Test 10: Account ID falls back to granted_sso_account_id when no role_arn.
+func TestList_AccountIDFromGrantedSSO(t *testing.T) {
+	writeConfig(t, `
+[profile prod-ReadOnly]
+region = ap-southeast-2
+granted_sso_account_id = 987654321098
+`)
+
+	result, err := profiles.List(context.Background(), "ReadOnly")
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, "987654321098", result[0].AccountID)
+}
+
 // Test 8: Results are sorted alphabetically.
 func TestList_SortedOutput(t *testing.T) {
 	writeConfig(t, `
@@ -145,5 +182,9 @@ region = us-east-1
 
 	result, err := profiles.List(context.Background(), "ReadOnly")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"a-ReadOnly", "m-ReadOnly", "z-ReadOnly"}, result)
+	assert.Equal(t, []profiles.Profile{
+		{Name: "a-ReadOnly", Region: "us-east-1"},
+		{Name: "m-ReadOnly", Region: "us-east-1"},
+		{Name: "z-ReadOnly", Region: "us-east-1"},
+	}, result)
 }

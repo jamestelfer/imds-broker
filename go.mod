@@ -30,5 +30,6 @@ require (
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/urfave/cli/v3 v3.8.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+	gopkg.in/ini.v1 v1.67.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
