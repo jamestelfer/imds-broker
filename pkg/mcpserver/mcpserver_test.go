@@ -149,6 +149,7 @@ func TestCreateServer_ReturnsBothURLs(t *testing.T) {
 	text := firstText(t, result)
 	assert.Contains(t, text, "http://127.0.0.1:12345")
 	assert.Contains(t, text, "http://host.docker.internal:12345")
+	assert.Contains(t, text, `"port":"12345"`)
 }
 
 // Test 4: create_server with no docker gateway returns only local URL.
