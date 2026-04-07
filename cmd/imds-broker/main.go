@@ -95,7 +95,7 @@ func imdsFactory(ctx context.Context, profile, region string, bindAddrs []string
 
 	stsClient := sts.NewFromConfig(cfg)
 
-	principalName, err := awscreds.ResolveCallerIdentity(ctx, stsClient)
+	identity, err := awscreds.ResolveCallerIdentity(ctx, stsClient)
 	if err != nil {
 		return nil, fmt.Errorf("mcp: resolve caller identity for profile %q: %w", profile, err)
 	}
@@ -105,7 +105,8 @@ func imdsFactory(ctx context.Context, profile, region string, bindAddrs []string
 	return imdsserver.New(imdsserver.Options{
 		Profile:       profile,
 		Region:        cfg.Region,
-		PrincipalName: principalName,
+		PrincipalName: identity.PrincipalName,
+		AccountID:     identity.AccountID,
 		BindAddrs:     bindAddrs,
 		Logger:        logger,
 		Credentials:   credProvider,
@@ -200,7 +201,7 @@ func serveCommand() *cli.Command {
 			stsClient := sts.NewFromConfig(cfg)
 
 			// Resolve the principal name and validate credentials at startup.
-			principalName, err := awscreds.ResolveCallerIdentity(ctx, stsClient)
+			identity, err := awscreds.ResolveCallerIdentity(ctx, stsClient)
 			if err != nil {
 				return fmt.Errorf("serve: resolve caller identity: %w", err)
 			}
@@ -212,7 +213,8 @@ func serveCommand() *cli.Command {
 			srv, err := imdsserver.New(imdsserver.Options{
 				Profile:       profile,
 				Region:        cfg.Region,
-				PrincipalName: principalName,
+				PrincipalName: identity.PrincipalName,
+				AccountID:     identity.AccountID,
 				BindAddrs:     []string{"127.0.0.1:0"},
 				Logger:        logger,
 				Credentials:   credProvider,

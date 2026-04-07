@@ -31,7 +31,7 @@ func testCreds() CredentialProvider {
 func newTestHandler(t *testing.T) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return newHandler("us-east-1", "TestRole", logger, testCreds())
+	return newHandler("us-east-1", "TestRole", "123456789012", logger, testCreds())
 }
 
 // getToken obtains a valid IMDSv2 token from the handler.
@@ -101,6 +101,7 @@ func TestAuthMiddleware_MissingToken(t *testing.T) {
 		"/latest/meta-data/placement/availability-zone/",
 		"/latest/meta-data/iam/security-credentials/",
 		"/latest/meta-data/iam/security-credentials/TestRole",
+		"/latest/dynamic/instance-identity/document",
 	} {
 		t.Run(path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -124,7 +125,7 @@ func TestAuthMiddleware_ExpiredToken(t *testing.T) {
 	h := newTestHandler(t)
 	// Use a token from a different handler instance (different secret) to simulate rejection.
 	otherLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	other := newHandler("us-west-2", "OtherRole", otherLogger, testCreds())
+	other := newHandler("us-west-2", "OtherRole", "", otherLogger, testCreds())
 
 	req := httptest.NewRequest(http.MethodPut, "/latest/api/token", nil)
 	req.Header.Set(headerTokenTTL, "60")
@@ -205,6 +206,34 @@ func TestCredentialDetailEndpoint(t *testing.T) {
 	assert.NotEmpty(t, resp.Token)
 	assert.NotEmpty(t, resp.Expiration)
 }
+
+// --- Instance identity document endpoint ---
+
+func TestInstanceIdentityDocumentEndpoint(t *testing.T) {
+	h := newTestHandler(t)
+	tok := getToken(t, h, 60)
+
+	req := httptest.NewRequest(http.MethodGet, "/latest/dynamic/instance-identity/document", nil)
+	req.Header.Set(headerToken, tok)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var doc struct {
+		Region           string `json:"region"`
+		AvailabilityZone string `json:"availabilityZone"`
+		InstanceID       string `json:"instanceId"`
+		AccountID        string `json:"accountId"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&doc))
+	assert.Equal(t, "us-east-1", doc.Region)
+	assert.Equal(t, "us-east-1a", doc.AvailabilityZone)
+	assert.Equal(t, "i-0000000000000000", doc.InstanceID)
+	assert.Equal(t, "123456789012", doc.AccountID)
+}
+
+// --- Credential detail endpoint ---
 
 func TestCredentialDetailEndpoint_WrongRole(t *testing.T) {
 	h := newTestHandler(t)

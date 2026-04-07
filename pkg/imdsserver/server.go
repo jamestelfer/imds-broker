@@ -24,6 +24,9 @@ type Options struct {
 	// endpoint. In production this is derived from STS GetCallerIdentity at
 	// startup. Tests supply a fixed string.
 	PrincipalName string
+	// AccountID is the AWS account ID, sourced from STS GetCallerIdentity at
+	// startup. Used in the instance identity document response.
+	AccountID string
 	// BindAddrs is the list of "host:port" addresses to listen on. Port 0
 	// selects an ephemeral port.
 	BindAddrs []string
@@ -47,7 +50,7 @@ func New(opts Options) (*Server, error) {
 		return nil, errors.New("imdsserver: at least one bind address is required")
 	}
 
-	handler := newHandler(opts.Region, opts.PrincipalName, opts.Logger, opts.Credentials)
+	handler := newHandler(opts.Region, opts.PrincipalName, opts.AccountID, opts.Logger, opts.Credentials)
 
 	lc := &net.ListenConfig{}
 	listeners := make([]net.Listener, 0, len(opts.BindAddrs))
