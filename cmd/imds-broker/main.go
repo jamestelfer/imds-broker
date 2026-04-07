@@ -131,7 +131,6 @@ func mcpCommand() *cli.Command {
 
 			b, err := broker.New(ctx, broker.Options{
 				Logger:        logger,
-				Executor:      broker.OSExecutor{},
 				ServerFactory: imdsFactory,
 			})
 			if err != nil {
