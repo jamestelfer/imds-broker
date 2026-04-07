@@ -124,6 +124,7 @@ func (h *imdsHandler) logRequest(next http.Handler) http.Handler {
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", sw.code,
+			"client", r.RemoteAddr,
 		)
 	})
 }

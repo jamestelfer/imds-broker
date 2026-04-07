@@ -108,14 +108,18 @@ func (b *Broker) CreateServer(ctx context.Context, profile, region string) (Crea
 	return CreateResult{LocalURL: e.localURL, DockerURL: e.dockerURL}, nil
 }
 
-// buildBindAddrs returns the bind addresses for a new server: always localhost,
-// plus the Docker gateway IP when one was discovered.
+// buildBindAddrs returns the bind addresses for a new server.
+// Binds to 0.0.0.0 so the server is reachable from Docker containers on the
+// host network as well as from localhost.
+//
+// TODO: restore per-interface binding once Docker gateway binding is reliable:
+//
+//	addrs := []string{"127.0.0.1:0"}
+//	if b.gatewayIP != "" {
+//	    addrs = append(addrs, b.gatewayIP+":0")
+//	}
 func (b *Broker) buildBindAddrs() []string {
-	addrs := []string{"127.0.0.1:0"}
-	if b.gatewayIP != "" {
-		addrs = append(addrs, b.gatewayIP+":0")
-	}
-	return addrs
+	return []string{"0.0.0.0:0"}
 }
 
 // newEntry constructs an entry from a running server, resolving the Docker URL
