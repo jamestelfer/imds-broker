@@ -69,6 +69,15 @@ All packages live under `pkg/` for importability. `cmd/` contains only CLI wirin
 - Modern Go only — no backwards-compatibility shims.
 - Use generics where they reduce duplication and improve clarity.
 
+### Verification
+
+Run `just verify` before every commit. It runs fmt, build, lint (golangci-lint), and tests in sequence. Do not use `go test ./...` or `go build ./...` as a substitute — `just verify` is the canonical check.
+
+Other useful targets:
+- `just test-v` — verbose test output
+- `just lint` — lint only
+- `just build` — build only
+
 ### Commit messages
 - Use [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): description`
 - Common types: `feat`, `fix`, `ci`, `docs`, `refactor`, `test`, `chore`

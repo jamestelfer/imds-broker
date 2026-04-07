@@ -5,15 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/urfave/cli/v3"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/jamestelfer/imds-broker/pkg/awscreds"
 	"github.com/jamestelfer/imds-broker/pkg/broker"
@@ -45,6 +48,54 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// resolveLogDir returns the log directory path using XDG_STATE_HOME if set,
+// falling back to $HOME/.local/state.
+func resolveLogDir() (string, error) {
+	base := os.Getenv("XDG_STATE_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home dir: %w", err)
+		}
+		base = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Join(base, "sandy", "logs", "imds-broker"), nil
+}
+
+// newCommandLogger constructs a JSON slog.Logger writing to a rotating log file
+// for the named command. The caller must close the returned io.Closer when done.
+func newCommandLogger(cmdName, levelStr string) (*slog.Logger, io.Closer, error) {
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(levelStr)); err != nil {
+		return nil, nil, fmt.Errorf("invalid log level %q: %w", levelStr, err)
+	}
+	lw, err := openLogFile(cmdName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open log file: %w", err)
+	}
+	return slog.New(slog.NewJSONHandler(lw, &slog.HandlerOptions{Level: level})), lw, nil
+}
+
+// openLogFile creates a rotating log file writer for the named command.
+// The file is placed in the directory returned by resolveLogDir(), named
+// "<cmdName>-<pid>.log". The directory is created if absent.
+func openLogFile(cmdName string) (io.WriteCloser, error) {
+	dir, err := resolveLogDir()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, fmt.Errorf("create log dir %q: %w", dir, err)
+	}
+	filename := filepath.Join(dir, fmt.Sprintf("%s-%d.log", cmdName, os.Getpid()))
+	return &lumberjack.Logger{
+		Filename:   filename,
+		MaxSize:    10, // MB
+		MaxBackups: 3,
+		MaxAge:     7, // days
+	}, nil
 }
 
 func profileFilterFlag() *cli.StringFlag {
@@ -120,12 +171,11 @@ func mcpCommand() *cli.Command {
 			profileFilterFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			levelStr := cmd.Root().String("log-level")
-			var level slog.Level
-			if err := level.UnmarshalText([]byte(levelStr)); err != nil {
-				return fmt.Errorf("invalid log level %q: %w", levelStr, err)
+			logger, lw, err := newCommandLogger("mcp", cmd.Root().String("log-level"))
+			if err != nil {
+				return err
 			}
-			logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+			defer func() { _ = lw.Close() }()
 
 			filter := cmd.String("profile-filter")
 
@@ -170,12 +220,11 @@ func serveCommand() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			levelStr := cmd.Root().String("log-level")
-			var level slog.Level
-			if err := level.UnmarshalText([]byte(levelStr)); err != nil {
-				return fmt.Errorf("invalid log level %q: %w", levelStr, err)
+			logger, lw, err := newCommandLogger("serve", cmd.Root().String("log-level"))
+			if err != nil {
+				return err
 			}
-			logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+			defer func() { _ = lw.Close() }()
 
 			profile := cmd.String("profile")
 			region := cmd.String("region")
