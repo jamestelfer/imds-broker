@@ -65,8 +65,9 @@ func resolveLogDir() (string, error) {
 }
 
 // newCommandLogger constructs a JSON slog.Logger writing to a rotating log file
-// for the named command. The caller must close the returned io.Closer when done.
-func newCommandLogger(cmdName, levelStr string) (*slog.Logger, io.Closer, error) {
+// for the named command. If extra is non-nil, log records are also written as
+// text to that writer. The caller must close the returned io.Closer when done.
+func newCommandLogger(cmdName, levelStr string, extra io.Writer) (*slog.Logger, io.Closer, error) {
 	var level slog.Level
 	if err := level.UnmarshalText([]byte(levelStr)); err != nil {
 		return nil, nil, fmt.Errorf("invalid log level %q: %w", levelStr, err)
@@ -75,7 +76,12 @@ func newCommandLogger(cmdName, levelStr string) (*slog.Logger, io.Closer, error)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open log file: %w", err)
 	}
-	return slog.New(slog.NewJSONHandler(lw, &slog.HandlerOptions{Level: level})), lw, nil
+	opts := &slog.HandlerOptions{Level: level}
+	handlers := []slog.Handler{slog.NewJSONHandler(lw, opts)}
+	if extra != nil {
+		handlers = append(handlers, slog.NewTextHandler(extra, opts))
+	}
+	return slog.New(slog.NewMultiHandler(handlers...)), lw, nil
 }
 
 // openLogFile creates a rotating log file writer for the named command.
@@ -128,6 +134,20 @@ func profilesCommand() *cli.Command {
 	}
 }
 
+// credentialProvider returns a provider that vends the credentials for cfg.
+// If the credentials are already temporary (session token present), they are
+// used as-is. Long-term credentials are upgraded via STS GetSessionToken.
+func credentialProvider(ctx context.Context, cfg aws.Config, stsClient *sts.Client) (aws.CredentialsProvider, error) {
+	creds, err := cfg.Credentials.Retrieve(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("retrieve credentials: %w", err)
+	}
+	if creds.SessionToken != "" {
+		return cfg.Credentials, nil
+	}
+	return aws.NewCredentialsCache(awscreds.NewSessionTokenProvider(stsClient)), nil
+}
+
 // imdsFactory is the broker.ServerFactory used in production. It loads AWS
 // credentials for the given profile, validates them via STS, and starts an
 // IMDS server.
@@ -151,7 +171,10 @@ func imdsFactory(ctx context.Context, profile, region string, bindAddrs []string
 		return nil, fmt.Errorf("mcp: resolve caller identity for profile %q: %w", profile, err)
 	}
 
-	credProvider := aws.NewCredentialsCache(awscreds.NewSessionTokenProvider(stsClient))
+	creds, err := credentialProvider(ctx, cfg, stsClient)
+	if err != nil {
+		return nil, fmt.Errorf("mcp: build credential provider for profile %q: %w", profile, err)
+	}
 
 	return imdsserver.New(imdsserver.Options{
 		Profile:       profile,
@@ -160,7 +183,7 @@ func imdsFactory(ctx context.Context, profile, region string, bindAddrs []string
 		AccountID:     identity.AccountID,
 		BindAddrs:     bindAddrs,
 		Logger:        logger,
-		Credentials:   credProvider,
+		Credentials:   creds,
 	})
 }
 
@@ -172,7 +195,7 @@ func mcpCommand() *cli.Command {
 			profileFilterFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			logger, lw, err := newCommandLogger("mcp", cmd.Root().String("log-level"))
+			logger, lw, err := newCommandLogger("mcp", cmd.Root().String("log-level"), nil)
 			if err != nil {
 				return err
 			}
@@ -219,9 +242,17 @@ func serveCommand() *cli.Command {
 				Name:  "region",
 				Usage: "AWS region (defaults to the profile-configured region)",
 			},
+			&cli.BoolFlag{
+				Name:  "quiet",
+				Usage: "suppress log output to stderr",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			logger, lw, err := newCommandLogger("serve", cmd.Root().String("log-level"))
+			var stderrWriter io.Writer
+			if !cmd.Bool("quiet") {
+				stderrWriter = os.Stderr
+			}
+			logger, lw, err := newCommandLogger("serve", cmd.Root().String("log-level"), stderrWriter)
 			if err != nil {
 				return err
 			}
@@ -255,9 +286,10 @@ func serveCommand() *cli.Command {
 				return fmt.Errorf("serve: resolve caller identity: %w", err)
 			}
 
-			// Upgrade static credentials to temporary via STS GetSessionToken.
-			// CredentialsCache handles refresh near expiry.
-			credProvider := aws.NewCredentialsCache(awscreds.NewSessionTokenProvider(stsClient))
+			creds, err := credentialProvider(ctx, cfg, stsClient)
+			if err != nil {
+				return fmt.Errorf("serve: build credential provider: %w", err)
+			}
 
 			srv, err := imdsserver.New(imdsserver.Options{
 				Profile:       profile,
@@ -266,7 +298,7 @@ func serveCommand() *cli.Command {
 				AccountID:     identity.AccountID,
 				BindAddrs:     []string{"127.0.0.1:0"},
 				Logger:        logger,
-				Credentials:   credProvider,
+				Credentials:   creds,
 			})
 			if err != nil {
 				return fmt.Errorf("serve: start server: %w", err)

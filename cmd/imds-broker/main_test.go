@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -46,6 +47,34 @@ func TestResolveLogDir_UsesXDGStateHome(t *testing.T) {
 	got, err := resolveLogDir()
 	require.NoError(t, err)
 	assert.Equal(t, "/some/custom/state/sandy/logs/imds-broker", got)
+}
+
+func TestNewCommandLogger_WritesTextToExtraWriter(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+
+	var buf bytes.Buffer
+	logger, lw, err := newCommandLogger("serve", "info", &buf)
+	require.NoError(t, err)
+	require.NotNil(t, logger)
+	defer func() { _ = lw.Close() }()
+
+	logger.Info("hello from serve")
+
+	assert.Contains(t, buf.String(), "hello from serve")
+}
+
+func TestNewCommandLogger_NilExtraWriterLogsToFileOnly(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+
+	logger, lw, err := newCommandLogger("serve", "info", nil)
+	require.NoError(t, err)
+	require.NotNil(t, logger)
+	defer func() { _ = lw.Close() }()
+
+	// Should not panic; file log still works.
+	logger.Info("quiet mode")
 }
 
 func TestResolveLogDir_FallsBackToHomeLocalState(t *testing.T) {
