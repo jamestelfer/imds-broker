@@ -32,23 +32,27 @@ func TestResolveCallerIdentity_APIError(t *testing.T) {
 func TestResolveCallerIdentity_AssumedRoleARN(t *testing.T) {
 	stub := &stubCallerIdentity{
 		output: &sts.GetCallerIdentityOutput{
-			Arn: new("arn:aws:sts::123456789012:assumed-role/MyRole/session"),
+			Arn:     new("arn:aws:sts::123456789012:assumed-role/MyRole/session"),
+			Account: new("123456789012"),
 		},
 	}
 
-	name, err := awscreds.ResolveCallerIdentity(context.Background(), stub)
+	identity, err := awscreds.ResolveCallerIdentity(context.Background(), stub)
 	require.NoError(t, err)
-	assert.Equal(t, "MyRole", name)
+	assert.Equal(t, "MyRole", identity.PrincipalName)
+	assert.Equal(t, "123456789012", identity.AccountID)
 }
 
 func TestResolveCallerIdentity_UserARN(t *testing.T) {
 	stub := &stubCallerIdentity{
 		output: &sts.GetCallerIdentityOutput{
-			Arn: new("arn:aws:iam::123456789012:user/johndoe"),
+			Arn:     new("arn:aws:iam::123456789012:user/johndoe"),
+			Account: new("123456789012"),
 		},
 	}
 
-	name, err := awscreds.ResolveCallerIdentity(context.Background(), stub)
+	identity, err := awscreds.ResolveCallerIdentity(context.Background(), stub)
 	require.NoError(t, err)
-	assert.Equal(t, "johndoe", name)
+	assert.Equal(t, "johndoe", identity.PrincipalName)
+	assert.Equal(t, "123456789012", identity.AccountID)
 }

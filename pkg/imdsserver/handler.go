@@ -41,18 +41,30 @@ type credentialResponse struct {
 type imdsHandler struct {
 	region        string
 	principalName string
+	accountID     string
 	logger        *slog.Logger
 	creds         CredentialProvider
 	tok           *token
 }
 
+// identityDocumentResponse is the IMDS JSON shape for the instance identity
+// document endpoint.
+type identityDocumentResponse struct {
+	Region           string `json:"region"`
+	AvailabilityZone string `json:"availabilityZone"`
+	InstanceID       string `json:"instanceId"`
+	AccountID        string `json:"accountId"`
+}
+
 // newHandler constructs an http.Handler implementing the IMDSv2 API.
 // principalName is the identity name returned by the credential listing endpoint
 // (in production, derived from STS GetCallerIdentity at startup).
-func newHandler(region, principalName string, logger *slog.Logger, creds CredentialProvider) http.Handler {
+// accountID is the AWS account ID included in the instance identity document.
+func newHandler(region, principalName, accountID string, logger *slog.Logger, creds CredentialProvider) http.Handler {
 	h := &imdsHandler{
 		region:        region,
 		principalName: principalName,
+		accountID:     accountID,
 		logger:        logger,
 		creds:         creds,
 		tok:           newToken(),
@@ -67,10 +79,16 @@ func (h *imdsHandler) buildMux() http.Handler {
 
 	protected := alice.New(h.requireToken)
 	mux.Handle("GET /latest/meta-data/placement/region", protected.ThenFunc(h.handleRegion))
+	mux.Handle("GET /latest/meta-data/placement/availability-zone/", protected.ThenFunc(h.handleAvailabilityZone))
+	mux.Handle("GET /latest/dynamic/instance-identity/document", protected.ThenFunc(h.handleInstanceIdentityDocument))
 	mux.Handle("GET /latest/meta-data/iam/security-credentials/", protected.ThenFunc(h.handleCredentialList))
 	mux.Handle("GET /latest/meta-data/iam/security-credentials/{role}", protected.ThenFunc(h.handleCredentialDetail))
 
 	return alice.New(h.logRequest).Then(mux)
+}
+
+func (h *imdsHandler) availabilityZone() string {
+	return h.region + "a"
 }
 
 // handleToken issues a new IMDSv2 session token.
@@ -127,6 +145,35 @@ func (h *imdsHandler) logRequest(next http.Handler) http.Handler {
 			"client", r.RemoteAddr,
 		)
 	})
+}
+
+func (h *imdsHandler) handleInstanceIdentityDocument(w http.ResponseWriter, r *http.Request) {
+	accountID := h.accountID
+	if accountID == "" {
+		accountID = "000000000000"
+	}
+
+	doc := identityDocumentResponse{
+		Region:           h.region,
+		AvailabilityZone: h.availabilityZone(),
+		InstanceID:       "i-0000000000000000",
+		AccountID:        accountID,
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		h.logger.Error("failed to marshal identity document", "error", err)
+		writeError(w, http.StatusInternalServerError, "InternalError", "Failed to build response")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
+}
+
+func (h *imdsHandler) handleAvailabilityZone(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = io.WriteString(w, h.availabilityZone())
 }
 
 func (h *imdsHandler) handleRegion(w http.ResponseWriter, _ *http.Request) {
