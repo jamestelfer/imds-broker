@@ -27,7 +27,7 @@ jobs:
           version=$(grep '^goreleaser' .tool-versions | awk '{print $2}')
           echo "goreleaser=${version}" >> "$GITHUB_OUTPUT"
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           version: ${{ steps.tool-versions.outputs.goreleaser }}
           args: release --clean
