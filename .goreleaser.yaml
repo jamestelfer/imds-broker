@@ -4,6 +4,7 @@ version: 2
 builds:
   - id: release
     binary: imds-broker
+    main: ./cmd/imds-broker
     flags:
       - "-trimpath"
     ldflags: "-w -X main.version={{.Version}}"
@@ -16,9 +17,6 @@ builds:
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: darwin
-        goarch: amd64
 
 checksum:
   name_template: "checksums.txt"

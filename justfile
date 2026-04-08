@@ -12,7 +12,7 @@ test:
 # Build the binary
 build:
     mkdir -p dist
-    go build -o dist/ ./cmd/imds-broker/...
+    CGO_ENABLED=0 go build -trimpath -o dist/ ./cmd/imds-broker/...
 
 # Run linter
 lint:
