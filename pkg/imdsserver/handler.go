@@ -193,7 +193,12 @@ func (h *imdsHandler) handleCredentialDetail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	creds, err := h.creds.Retrieve(r.Context())
+	// Use a detached context for credential retrieval. SSO credentials require
+	// a network round-trip to refresh; tying that to r.Context() causes
+	// "context canceled" failures if the client's read deadline fires first.
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	creds, err := h.creds.Retrieve(ctx)
 	if err != nil {
 		h.logger.Error("failed to retrieve credentials", "error", err)
 		writeError(w, http.StatusInternalServerError, "InternalError", "Failed to retrieve credentials")
