@@ -7,15 +7,11 @@ Useful for:
 - CI pipelines or tools that only support EC2 instance credential resolution
 - AI assistants (Claude, etc.) that need to call AWS APIs as part of agentic workflows
 
----
-
 ## What it does
 
 imds-broker starts a local HTTP server implementing the EC2 Instance Metadata Service v2 (IMDSv2) protocol. AWS SDKs pointed at it via `AWS_EC2_METADATA_SERVICE_ENDPOINT` resolve credentials the same way they would on a real EC2 instance — by fetching a short-lived token then exchanging it for credentials.
 
 The broker reads credentials from your AWS config files or SSO session on the host, validates them via STS, and vends them on demand. Static IAM credentials are automatically upgraded to short-lived session tokens before serving.
-
----
 
 ## Installation
 
@@ -33,7 +29,6 @@ Available platforms:
 | macOS   | arm64 | `imds-broker_darwin_arm64.tar.gz`   |
 | Windows | amd64 | `imds-broker_windows_amd64.zip`     |
 | Windows | arm64 | `imds-broker_windows_arm64.zip`     |
-
 
 Example (macOS arm64):
 
@@ -57,8 +52,6 @@ Requires Go 1.22+.
 ```sh
 go install github.com/jamestelfer/imds-broker/cmd/imds-broker@latest
 ```
-
----
 
 ## Usage
 
@@ -118,8 +111,6 @@ Lists AWS profiles matching the filter as a JSON array. Useful for scripting or 
 imds-broker profiles [--profile-filter REGEX]
 ```
 
----
-
 ## Docker
 
 The `serve` command binds to `0.0.0.0`, so containers can reach it on the host. No credentials enter the container — only the endpoint URL does.
@@ -145,8 +136,6 @@ docker run --rm \
 
 This pattern works with any AWS SDK in any language inside the container.
 
----
-
 ## Strengths
 
 - **No credential env vars** — credentials stay in AWS config files or SSO session on the host; they never enter a container or subprocess environment.
@@ -155,8 +144,6 @@ This pattern works with any AWS SDK in any language inside the container.
 - **MCP integration** — AI assistants can manage IMDS server lifecycle via natural-language tool calls.
 - **Profile filtering** — the MCP server limits which profiles are visible via a configurable regex.
 - **STS credential upgrade** — long-lived IAM credentials are automatically wrapped with STS `GetSessionToken` before vending, so the container always receives short-lived tokens.
-
----
 
 ## Caveats
 
