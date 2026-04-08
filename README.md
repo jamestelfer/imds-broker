@@ -143,3 +143,7 @@ imds-broker profiles [--profile-filter REGEX]
 - **Default profile filter is restrictive** — `ReadOnly|ViewOnly` profiles only. If your profiles don't match this pattern, set `--profile-filter` explicitly (e.g. `--profile-filter ".*"`).
 - **No persistent state** — if the broker process exits, all running servers stop. Clients that cached the endpoint will need to reconnect after restarting the broker.
 - **Mac/Windows Docker networking** — `--network host` is not supported on Docker Desktop; use `host.docker.internal` instead.
+
+## Acknowledgements
+
+The IMDSv2 token design and error handling in this project are derived from Ben Kehoe's [imds-credential-server](https://github.com/benkehoe/imds-credential-server). Thanks to Ben for the original implementation and releasing it for others to discover!

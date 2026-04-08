@@ -1,3 +1,9 @@
+// The IMDSv2 token design in this file — HMAC-SHA256 with an RFC 3339 expiry
+// embedded in the token — is derived from benkehoe/imds-credential-server:
+//
+//	https://github.com/benkehoe/imds-credential-server
+//	Copyright 2020 Ben Kehoe, licensed under Apache 2.0
+
 package imdsserver
 
 import (

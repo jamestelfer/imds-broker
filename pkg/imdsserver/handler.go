@@ -235,6 +235,9 @@ func (h *imdsHandler) handleCredentialDetail(w http.ResponseWriter, r *http.Requ
 }
 
 // writeError writes a structured JSON error response.
+// The error structure and the error codes used by the handlers are derived from
+// benkehoe/imds-credential-server (Copyright 2020 Ben Kehoe, Apache 2.0):
+// https://github.com/benkehoe/imds-credential-server
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	type innerErr struct {
 		Code    string `json:"Code"`
