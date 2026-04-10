@@ -79,19 +79,47 @@ func firstText(t *testing.T, result *mcp.CallToolResult) string {
 
 // ---- tests ----
 
+// TestNewProfileFilter_ValidRegex_AllowsMatchingName checks that Allowed returns
+// true for a name that matches the regex.
+func TestNewProfileFilter_ValidRegex_AllowsMatchingName(t *testing.T) {
+	pf, err := mcpserver.NewProfileFilter("ReadOnly")
+	require.NoError(t, err)
+	assert.True(t, pf.Allowed("dev-ReadOnly"))
+}
+
+// TestNewProfileFilter_ValidRegex_RejectsNonMatchingName checks that Allowed
+// returns false for a name that does not match the regex.
+func TestNewProfileFilter_ValidRegex_RejectsNonMatchingName(t *testing.T) {
+	pf, err := mcpserver.NewProfileFilter("ReadOnly")
+	require.NoError(t, err)
+	assert.False(t, pf.Allowed("admin-prod"))
+}
+
+// TestNewProfileFilter_EmptyFilter_UsesDefaultFilter checks that an empty filter
+// string falls back to the default (ReadOnly|ViewOnly).
+func TestNewProfileFilter_EmptyFilter_UsesDefaultFilter(t *testing.T) {
+	pf, err := mcpserver.NewProfileFilter("")
+	require.NoError(t, err)
+	assert.True(t, pf.Allowed("dev-ReadOnly"))
+	assert.True(t, pf.Allowed("prod-ViewOnly"))
+	assert.False(t, pf.Allowed("admin-prod"))
+}
+
 // Test 1 (tracer bullet): list_profiles returns a JSON array of profile objects.
 func TestListProfiles_ReturnsMatchingProfiles(t *testing.T) {
-	lister := func(_ context.Context, _ string) ([]profiles.Profile, error) {
+	filter, err := mcpserver.NewProfileFilter("ReadOnly")
+	require.NoError(t, err)
+	lister := func(_ context.Context) ([]profiles.Profile, error) {
 		return []profiles.Profile{
 			{Name: "dev-ReadOnly", AccountID: "111122223333", Region: "us-east-1"},
 			{Name: "prod-ReadOnly", AccountID: "444455556666", Region: "ap-southeast-2"},
 		}, nil
 	}
 	s := mcpserver.New(mcpserver.Options{
-		Broker:        &fakeBroker{},
-		ListProfiles:  lister,
-		ProfileFilter: "ReadOnly",
-		Logger:        discardLogger(),
+		Broker:       &fakeBroker{},
+		ListProfiles: lister,
+		Filter:       filter,
+		Logger:       discardLogger(),
 	})
 	c := newTestClient(t, s)
 
@@ -106,12 +134,15 @@ func TestListProfiles_ReturnsMatchingProfiles(t *testing.T) {
 
 // Test 2: list_profiles with empty result returns empty JSON array.
 func TestListProfiles_EmptyResult_ReturnsEmptyArray(t *testing.T) {
-	lister := func(_ context.Context, _ string) ([]profiles.Profile, error) {
+	filter, err := mcpserver.NewProfileFilter(".*")
+	require.NoError(t, err)
+	lister := func(_ context.Context) ([]profiles.Profile, error) {
 		return nil, nil
 	}
 	s := mcpserver.New(mcpserver.Options{
 		Broker:       &fakeBroker{},
 		ListProfiles: lister,
+		Filter:       filter,
 		Logger:       discardLogger(),
 	})
 	c := newTestClient(t, s)
@@ -127,12 +158,15 @@ func TestListProfiles_EmptyResult_ReturnsEmptyArray(t *testing.T) {
 
 // Test 3: create_server returns local URL and port.
 func TestCreateServer_ReturnsLocalURLAndPort(t *testing.T) {
+	filter, err := mcpserver.NewProfileFilter(".*")
+	require.NoError(t, err)
 	b := &fakeBroker{
 		createResult: broker.CreateResult{LocalURL: "http://127.0.0.1:12345"},
 	}
 	s := mcpserver.New(mcpserver.Options{
 		Broker:       b,
-		ListProfiles: func(_ context.Context, _ string) ([]profiles.Profile, error) { return nil, nil },
+		ListProfiles: func(_ context.Context) ([]profiles.Profile, error) { return nil, nil },
+		Filter:       filter,
 		Logger:       discardLogger(),
 	})
 	c := newTestClient(t, s)
@@ -149,12 +183,99 @@ func TestCreateServer_ReturnsLocalURLAndPort(t *testing.T) {
 	assert.NotContains(t, text, "docker")
 }
 
-// Test 4: stop_server returns success for a known URL.
-func TestStopServer_KnownURL_ReturnsSuccess(t *testing.T) {
+// TestCreateServer_ProfileMatchingFilter_Succeeds checks that create_server
+// succeeds when the profile name matches the configured filter.
+func TestCreateServer_ProfileMatchingFilter_Succeeds(t *testing.T) {
+	filter, err := mcpserver.NewProfileFilter("ReadOnly")
+	require.NoError(t, err)
+	b := &fakeBroker{createResult: broker.CreateResult{LocalURL: "http://127.0.0.1:12345"}}
+	s := mcpserver.New(mcpserver.Options{
+		Broker:       b,
+		ListProfiles: func(_ context.Context) ([]profiles.Profile, error) { return nil, nil },
+		Filter:       filter,
+		Logger:       discardLogger(),
+	})
+	c := newTestClient(t, s)
+
+	result := callTool(t, c, "create_server", map[string]any{"profile": "dev-ReadOnly"})
+
+	require.False(t, result.IsError)
+}
+
+// TestListProfiles_FilterAppliedToResults verifies that the handler uses the
+// ProfileFilter to exclude non-matching profiles returned by the lister.
+func TestListProfiles_FilterAppliedToResults(t *testing.T) {
+	filter, err := mcpserver.NewProfileFilter("ReadOnly")
+	require.NoError(t, err)
+	lister := func(_ context.Context) ([]profiles.Profile, error) {
+		return []profiles.Profile{
+			{Name: "dev-ReadOnly"},
+			{Name: "admin-prod"}, // must be excluded by filter
+		}, nil
+	}
+	s := mcpserver.New(mcpserver.Options{
+		Broker:       &fakeBroker{},
+		ListProfiles: lister,
+		Filter:       filter,
+		Logger:       discardLogger(),
+	})
+	c := newTestClient(t, s)
+
+	result := callTool(t, c, "list_profiles", nil)
+
+	require.False(t, result.IsError)
+	text := firstText(t, result)
+	assert.Contains(t, text, "dev-ReadOnly")
+	assert.NotContains(t, text, "admin-prod")
+}
+
+// TestCreateServer_ProfileNotMatchingFilter_ReturnsError checks that create_server
+// returns a tool error when the profile does not match the configured filter.
+func TestCreateServer_ProfileNotMatchingFilter_ReturnsError(t *testing.T) {
+	filter, err := mcpserver.NewProfileFilter("ReadOnly")
+	require.NoError(t, err)
 	b := &fakeBroker{}
 	s := mcpserver.New(mcpserver.Options{
 		Broker:       b,
-		ListProfiles: func(_ context.Context, _ string) ([]profiles.Profile, error) { return nil, nil },
+		ListProfiles: func(_ context.Context) ([]profiles.Profile, error) { return nil, nil },
+		Filter:       filter,
+		Logger:       discardLogger(),
+	})
+	c := newTestClient(t, s)
+
+	result := callTool(t, c, "create_server", map[string]any{"profile": "admin-prod"})
+
+	assert.True(t, result.IsError)
+}
+
+// TestCreateServer_DefaultFilter_RejectsUnmatchedProfile checks that with no
+// explicit filter the default (ReadOnly|ViewOnly) blocks non-matching profiles.
+func TestCreateServer_DefaultFilter_RejectsUnmatchedProfile(t *testing.T) {
+	filter, err := mcpserver.NewProfileFilter("")
+	require.NoError(t, err)
+	b := &fakeBroker{}
+	s := mcpserver.New(mcpserver.Options{
+		Broker:       b,
+		ListProfiles: func(_ context.Context) ([]profiles.Profile, error) { return nil, nil },
+		Filter:       filter,
+		Logger:       discardLogger(),
+	})
+	c := newTestClient(t, s)
+
+	result := callTool(t, c, "create_server", map[string]any{"profile": "admin-prod"})
+
+	assert.True(t, result.IsError)
+}
+
+// Test 4: stop_server returns success for a known URL.
+func TestStopServer_KnownURL_ReturnsSuccess(t *testing.T) {
+	filter, err := mcpserver.NewProfileFilter(".*")
+	require.NoError(t, err)
+	b := &fakeBroker{}
+	s := mcpserver.New(mcpserver.Options{
+		Broker:       b,
+		ListProfiles: func(_ context.Context) ([]profiles.Profile, error) { return nil, nil },
+		Filter:       filter,
 		Logger:       discardLogger(),
 	})
 	c := newTestClient(t, s)
@@ -167,10 +288,13 @@ func TestStopServer_KnownURL_ReturnsSuccess(t *testing.T) {
 
 // Test 6: stop_server returns an error result for an unknown URL.
 func TestStopServer_UnknownURL_ReturnsErrorResult(t *testing.T) {
+	filter, err := mcpserver.NewProfileFilter(".*")
+	require.NoError(t, err)
 	b := &fakeBroker{stopErr: assert.AnError}
 	s := mcpserver.New(mcpserver.Options{
 		Broker:       b,
-		ListProfiles: func(_ context.Context, _ string) ([]profiles.Profile, error) { return nil, nil },
+		ListProfiles: func(_ context.Context) ([]profiles.Profile, error) { return nil, nil },
+		Filter:       filter,
 		Logger:       discardLogger(),
 	})
 	c := newTestClient(t, s)
