@@ -10,6 +10,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/url"
+	"regexp"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	mcplib "github.com/mark3labs/mcp-go/server"
@@ -18,8 +19,32 @@ import (
 	"github.com/jamestelfer/imds-broker/pkg/profiles"
 )
 
-// ProfileLister is the signature of profiles.List.
-type ProfileLister func(ctx context.Context, filter string) ([]profiles.Profile, error)
+// ProfileFilter determines whether a named AWS profile is permitted.
+type ProfileFilter interface {
+	Allowed(name string) bool
+}
+
+type regexFilter struct{ re *regexp.Regexp }
+
+func (f *regexFilter) Allowed(name string) bool { return f.re.MatchString(name) }
+
+// NewProfileFilter returns a ProfileFilter backed by a compiled regex.
+// Uses profiles.DefaultFilter when filter is empty.
+// Returns an error if filter is not a valid regular expression.
+func NewProfileFilter(filter string) (ProfileFilter, error) {
+	if filter == "" {
+		filter = profiles.DefaultFilter
+	}
+	re, err := regexp.Compile(filter)
+	if err != nil {
+		return nil, fmt.Errorf("invalid profile filter %q: %w", filter, err)
+	}
+	return &regexFilter{re: re}, nil
+}
+
+// ProfileLister returns all discoverable AWS profiles. Filtering is handled
+// separately by ProfileFilter.
+type ProfileLister func(ctx context.Context) ([]profiles.Profile, error)
 
 // BrokerFace is the broker subset required by the MCP server.
 type BrokerFace interface {
@@ -29,10 +54,10 @@ type BrokerFace interface {
 
 // Options configures the MCP server.
 type Options struct {
-	Broker        BrokerFace
-	ListProfiles  ProfileLister
-	ProfileFilter string
-	Logger        *slog.Logger
+	Broker       BrokerFace
+	ListProfiles ProfileLister
+	Filter       ProfileFilter
+	Logger       *slog.Logger
 }
 
 // MCPServer wraps the underlying MCP server so callers can access it via
@@ -61,8 +86,8 @@ func New(opts Options) *MCPServer {
 		mcplib.WithToolCapabilities(false),
 	)
 
-	s.AddTool(listProfilesTool(), listProfilesHandler(opts.ListProfiles, opts.ProfileFilter, opts.Logger))
-	s.AddTool(createServerTool(), createServerHandler(opts.Broker, opts.Logger))
+	s.AddTool(listProfilesTool(), listProfilesHandler(opts.ListProfiles, opts.Filter, opts.Logger))
+	s.AddTool(createServerTool(), createServerHandler(opts.Broker, opts.Filter, opts.Logger))
 	s.AddTool(stopServerTool(), stopServerHandler(opts.Broker, opts.Logger))
 
 	return &MCPServer{s: s}
@@ -82,16 +107,19 @@ func requestID() string {
 }
 
 // listProfilesHandler returns a handler that calls the profile lister and
-// returns the result as a JSON array.
-func listProfilesHandler(lister ProfileLister, filter string, logger *slog.Logger) mcplib.ToolHandlerFunc {
+// returns filtered results as a JSON array.
+func listProfilesHandler(lister ProfileLister, filter ProfileFilter, logger *slog.Logger) mcplib.ToolHandlerFunc {
 	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger.Info("mcp tool call", "tool", "list_profiles", "request_id", requestID())
-		names, err := lister(ctx, filter)
+		all, err := lister(ctx)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		if names == nil {
-			names = []profiles.Profile{}
+		names := []profiles.Profile{}
+		for _, p := range all {
+			if filter.Allowed(p.Name) {
+				names = append(names, p)
+			}
 		}
 		b, err := json.Marshal(names)
 		if err != nil {
@@ -122,12 +150,15 @@ type serverURLs struct {
 }
 
 // createServerHandler returns a handler that starts (or returns) an IMDS server.
-func createServerHandler(b BrokerFace, logger *slog.Logger) mcplib.ToolHandlerFunc {
+func createServerHandler(b BrokerFace, filter ProfileFilter, logger *slog.Logger) mcplib.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger.Info("mcp tool call", "tool", "create_server", "request_id", requestID())
 		profile, err := req.RequireString("profile")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if !filter.Allowed(profile) {
+			return mcp.NewToolResultError(fmt.Sprintf("profile %q does not match the configured filter", profile)), nil
 		}
 		region := req.GetString("region", "")
 

@@ -203,6 +203,11 @@ func mcpCommand() *cli.Command {
 
 			filter := cmd.String("profile-filter")
 
+			pf, err := mcpserver.NewProfileFilter(filter)
+			if err != nil {
+				return fmt.Errorf("mcp: invalid profile filter: %w", err)
+			}
+
 			b, err := broker.New(ctx, broker.Options{
 				Logger:        logger,
 				ServerFactory: imdsFactory,
@@ -211,11 +216,15 @@ func mcpCommand() *cli.Command {
 				return fmt.Errorf("mcp: create broker: %w", err)
 			}
 
+			lister := func(ctx context.Context) ([]profiles.Profile, error) {
+				return profiles.List(ctx, ".*") // return all; ProfileFilter is the gate
+			}
+
 			s := mcpserver.New(mcpserver.Options{
-				Broker:        b,
-				ListProfiles:  profiles.List,
-				ProfileFilter: filter,
-				Logger:        logger,
+				Broker:       b,
+				ListProfiles: lister,
+				Filter:       pf,
+				Logger:       logger,
 			})
 
 			if err := s.ServeStdio(); err != nil {
