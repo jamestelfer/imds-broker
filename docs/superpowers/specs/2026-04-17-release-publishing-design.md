@@ -136,22 +136,30 @@ const binaryPath = path.join(path.dirname(require.resolve(`${pkg}/package.json`)
 execFileSync(binaryPath, process.argv.slice(2), { stdio: 'inherit' });
 ```
 
+### npm auth — OIDC trusted publishing
+
+npm is configured with GitHub as a trusted publisher (no stored token required). The workflow requests an OIDC token from GitHub; npm validates it and authorises the publish.
+
+`npm publish` is called with `--provenance`, which attaches a signed attestation linking the package to the exact commit and workflow run.
+
 ### CI changes
 
-- Add a `uses: actions/setup-node` step with `registry-url: https://registry.npmjs.org` before the publish step — this configures npm auth automatically when `NODE_AUTH_TOKEN` is set in the environment.
-- After the goreleaser step, add a step in the same `release` job:
+- Add `id-token: write` to the job's `permissions` block (required to obtain the OIDC token)
+- Add a `uses: actions/setup-node` step with `registry-url: https://registry.npmjs.org` before the publish step
+- After the goreleaser step:
   ```yaml
   - name: Publish npm packages
     run: .github/workflows/npm/publish.sh "${VERSION}"
     env:
       VERSION: ${{ github.ref_name }}   # e.g. v1.2.3 — script strips leading 'v'
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
   ```
+
+The publish script calls `npm publish --provenance --access public`. No `NODE_AUTH_TOKEN` is needed — the OIDC exchange is handled automatically by the npm CLI when the `id-token: write` permission is present.
 
 ### Prerequisites
 
-- `NPM_TOKEN`: an npm automation token with publish rights to the `@jamestelfer` scope, stored as a secret in the `release` environment
-- The `@jamestelfer/imds-broker*` package names must be claimed on npm before first publish (publish with `--access public` on the first run)
+- Each `@jamestelfer/imds-broker*` package must have a Trusted Publisher configured on npmjs.com scoped to repo `jamestelfer/imds-broker`, workflow `release.yml`, environment `release`
+- The `@jamestelfer/imds-broker*` package names must be claimed on npm before the first publish (initial publish with `--access public`)
 
 ---
 
@@ -160,9 +168,10 @@ execFileSync(binaryPath, process.argv.slice(2), { stdio: 'inherit' });
 ```yaml
 jobs:
   release:
-    environment: release          # scopes GITHUB_HOMEBREW_TOKEN and NPM_TOKEN
+    environment: release          # scopes GITHUB_HOMEBREW_TOKEN; satisfies npm trusted publisher env constraint
     permissions:
       contents: write
+      id-token: write             # required for npm OIDC trusted publishing
     steps:
       - checkout
       - setup-go
@@ -170,10 +179,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_HOMEBREW_TOKEN: ${{ secrets.GITHUB_HOMEBREW_TOKEN }}
-      - setup-node (sets npm registry)
-      - setup-node (sets npm registry auth via NODE_AUTH_TOKEN)
+      - setup-node (registry-url: https://registry.npmjs.org)
       - npm publish step (.github/workflows/npm/publish.sh)
         env:
           VERSION: ${{ github.ref_name }}   # v1.2.3 — script strips 'v'
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # no NPM_TOKEN needed — OIDC trusted publishing
 ```
