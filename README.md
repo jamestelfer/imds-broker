@@ -14,51 +14,20 @@ imds-broker reads credentials from your AWS config files or SSO session on the h
 
 ## Installation
 
-### Direct download
-
-Pre-built binaries are available on the [releases page](https://github.com/jamestelfer/imds-broker/releases).
-
-Available platforms:
-
-| OS      | Arch  | Archive                              |
-|---------|-------|--------------------------------------|
-| Linux   | amd64 | `imds-broker_linux_amd64.tar.gz`    |
-| Linux   | arm64 | `imds-broker_linux_arm64.tar.gz`    |
-| macOS   | amd64 | `imds-broker_darwin_amd64.tar.gz`   |
-| macOS   | arm64 | `imds-broker_darwin_arm64.tar.gz`   |
-| Windows | amd64 | `imds-broker_windows_amd64.zip`     |
-| Windows | arm64 | `imds-broker_windows_arm64.zip`     |
-
-Example (macOS arm64):
+<details>
+<summary><strong>Homebrew (macOS)</strong></summary>
 
 ```sh
-curl -L https://github.com/jamestelfer/imds-broker/releases/download/v0.1.0/imds-broker_darwin_arm64.tar.gz | tar xz
-sudo mv imds-broker /usr/local/bin/
+brew install jamestelfer/tap/imds-broker
 ```
 
-### mise
-
-[mise](https://mise.jdx.dev/) can install imds-broker directly from GitHub Releases using the [github backend](https://mise.jdx.dev/dev-tools/backends/github.html):
+MCP configuration:
 
 ```sh
-mise use -g github:jamestelfer/imds-broker
+claude mcp add imds-broker -- imds-broker mcp
 ```
 
-### Build from source
-
-Requires Go 1.22+.
-
-```sh
-go install github.com/jamestelfer/imds-broker/cmd/imds-broker@latest
-```
-
-## Usage
-
-### MCP server (agent integration)
-
-The `mcp` command runs an [MCP](https://modelcontextprotocol.io/) stdio server exposing three tools: `list_profiles`, `create_server`, and `stop_server`.
-
-Configure in `claude_desktop_config.json` (or equivalent MCP host config):
+Or add to your MCP config file (`claude_desktop_config.json`, `.cursor/mcp.json`, etc.):
 
 ```json
 {
@@ -70,6 +39,90 @@ Configure in `claude_desktop_config.json` (or equivalent MCP host config):
   }
 }
 ```
+
+</details>
+
+<details>
+<summary><strong>npm</strong></summary>
+
+```sh
+npm install -g @jamestelfer/imds-broker
+```
+
+MCP configuration:
+
+```sh
+claude mcp add imds-broker -- imds-broker mcp
+```
+
+Or add to your MCP config file:
+
+```json
+{
+  "mcpServers": {
+    "imds-broker": {
+      "command": "imds-broker",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary><strong>mise</strong></summary>
+
+[mise](https://mise.jdx.dev/) installs directly from GitHub Releases using the [github backend](https://mise.jdx.dev/dev-tools/backends/github.html):
+
+```sh
+mise use -g github:jamestelfer/imds-broker
+```
+
+MCP configuration:
+
+```sh
+claude mcp add imds-broker -- mise x github:jamestelfer/imds-broker -- imds-broker mcp
+```
+
+Or add to your MCP config file:
+
+```json
+{
+  "mcpServers": {
+    "imds-broker": {
+      "command": "mise",
+      "args": ["x", "github:jamestelfer/imds-broker", "--", "imds-broker", "mcp"]
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Manual download</strong></summary>
+
+Pre-built binaries for all platforms are available on the [releases page](https://github.com/jamestelfer/imds-broker/releases). Download the archive for your OS and architecture, extract, and place the binary somewhere on your `PATH`.
+
+| OS      | Arch  | Archive                              |
+|---------|-------|--------------------------------------|
+| Linux   | amd64 | `imds-broker_linux_amd64.tar.gz`    |
+| Linux   | arm64 | `imds-broker_linux_arm64.tar.gz`    |
+| macOS   | amd64 | `imds-broker_darwin_amd64.tar.gz`   |
+| macOS   | arm64 | `imds-broker_darwin_arm64.tar.gz`   |
+| Windows | amd64 | `imds-broker_windows_amd64.zip`     |
+| Windows | arm64 | `imds-broker_windows_arm64.zip`     |
+
+Once installed, configure MCP as above using `claude mcp add` or your MCP config file.
+
+</details>
+
+## Usage
+
+### MCP server (agent integration)
+
+The `mcp` command runs an [MCP](https://modelcontextprotocol.io/) stdio server exposing three tools: `list_profiles`, `create_server`, and `stop_server`. See the install instructions above for MCP configuration.
 
 The agent calls `create_server` with a profile name to get back an endpoint URL, sets `AWS_EC2_METADATA_SERVICE_ENDPOINT` in the environment it's working in, and calls `stop_server` when finished. This works in sandboxed environments where the agent cannot run `aws configure` or assume roles via the CLI.
 
