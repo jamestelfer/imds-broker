@@ -64,7 +64,7 @@ publish_platform_package() {
 }
 PKGJSON
 
-  (cd "${tmpdir}" && npm publish --provenance --access public)
+  npm publish --access public "${tmpdir}"
   echo "published ${pkg_name}@${version}"
 }
 
@@ -77,7 +77,7 @@ publish_main_package() {
   # Replace placeholder version with the release version
   sed -i "s/0\.0\.0-dev/${version}/g" "${tmpdir}/package.json"
 
-  (cd "${tmpdir}" && npm publish --provenance --access public)
+  npm publish --access public "${tmpdir}"
   echo "published @jamestelfer/imds-broker@${version}"
 }
 
