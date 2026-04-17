@@ -64,7 +64,7 @@ publish_platform_package() {
 }
 PKGJSON
 
-  npm publish --access public "${tmpdir}"
+  npm publish --access public "${tag_args[@]+"${tag_args[@]}"}" "${tmpdir}"
   echo "published ${pkg_name}@${version}"
 }
 
@@ -77,13 +77,18 @@ publish_main_package() {
   # Replace placeholder version with the release version
   sed -i "s/0\.0\.0-dev/${version}/g" "${tmpdir}/package.json"
 
-  npm publish --access public "${tmpdir}"
+  npm publish --access public "${tag_args[@]+"${tag_args[@]}"}" "${tmpdir}"
   echo "published @jamestelfer/imds-broker@${version}"
 }
 
 main() {
   local version="${1:?'usage: publish.sh <version>'}"
   version="${version#v}"  # strip leading v
+
+  local tag_args=()
+  if [[ "${version}" == *-* ]]; then
+    tag_args=(--tag next)
+  fi
 
   publish_platform_package "${version}" linux_amd64   linux-x64    linux  x64   imds-broker
   publish_platform_package "${version}" linux_arm64   linux-arm64  linux  arm64 imds-broker
