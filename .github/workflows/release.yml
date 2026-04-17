@@ -9,6 +9,7 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     steps:
@@ -33,3 +34,4 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_HOMEBREW_TOKEN: ${{ secrets.GITHUB_HOMEBREW_TOKEN }}
