@@ -59,7 +59,7 @@ publish_platform_package() {
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jamestelfer/imds-broker.git"
+    "url": "git+https://github.com/jamestelfer/imds-broker.git"
   }
 }
 PKGJSON

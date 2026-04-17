@@ -46,7 +46,7 @@ homebrew_casks:
     repository:
       owner: jamestelfer
       name: homebrew-tap
-      token: "{{ .Env.GITHUB_HOMEBREW_TOKEN }}"
+      token: "{{ .Env.HOMEBREW_GITHUB_TOKEN }}"
     binaries:
       - imds-broker
     hooks:

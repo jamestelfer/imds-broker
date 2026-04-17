@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jamestelfer/imds-broker.git"
+    "url": "git+https://github.com/jamestelfer/imds-broker.git"
   },
   "bin": {
     "imds-broker": "./bin/imds-broker.js"
