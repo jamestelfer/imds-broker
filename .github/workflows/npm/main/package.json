@@ -1,0 +1,28 @@
+{
+  "name": "@jamestelfer/imds-broker",
+  "version": "0.0.0-dev",
+  "description": "AWS IMDSv2-compatible credential server for local development and CI",
+  "homepage": "https://github.com/jamestelfer/imds-broker",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamestelfer/imds-broker.git"
+  },
+  "bin": {
+    "imds-broker": "./bin/imds-broker.js"
+  },
+  "files": [
+    "bin/imds-broker.js"
+  ],
+  "optionalDependencies": {
+    "@jamestelfer/imds-broker-linux-x64": "0.0.0-dev",
+    "@jamestelfer/imds-broker-linux-arm64": "0.0.0-dev",
+    "@jamestelfer/imds-broker-darwin-x64": "0.0.0-dev",
+    "@jamestelfer/imds-broker-darwin-arm64": "0.0.0-dev",
+    "@jamestelfer/imds-broker-windows-x64": "0.0.0-dev",
+    "@jamestelfer/imds-broker-windows-arm64": "0.0.0-dev"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
