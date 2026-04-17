@@ -35,3 +35,23 @@ changelog:
 
 release:
   prerelease: auto
+
+homebrew_casks:
+  - name: imds-broker
+    directory: Casks
+    homepage: "https://github.com/jamestelfer/imds-broker"
+    description: "AWS IMDSv2-compatible credential server for local development and CI"
+    url:
+      verified: "github.com/jamestelfer/imds-broker"
+    repository:
+      owner: jamestelfer
+      name: homebrew-tap
+      token: "{{ .Env.GITHUB_HOMEBREW_TOKEN }}"
+    binaries:
+      - imds-broker
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/imds-broker"]
+          end
