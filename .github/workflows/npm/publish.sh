@@ -74,6 +74,7 @@ publish_main_package() {
   tmpdir="$(make_tmpdir)"
 
   cp -r "${SCRIPT_DIR}/main/." "${tmpdir}/"
+  cp "${SCRIPT_DIR}/../../../README.md" "${tmpdir}/README.md"
   # Replace placeholder version with the release version
   sed -i "s/0\.0\.0-dev/${version}/g" "${tmpdir}/package.json"
 

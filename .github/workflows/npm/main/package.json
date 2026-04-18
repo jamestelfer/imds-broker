@@ -12,7 +12,8 @@
     "imds-broker": "./bin/imds-broker.js"
   },
   "files": [
-    "bin/imds-broker.js"
+    "bin/imds-broker.js",
+    "README.md"
   ],
   "optionalDependencies": {
     "@jamestelfer/imds-broker-linux-x64": "0.0.0-dev",
