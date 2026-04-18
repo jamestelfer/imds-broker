@@ -1,6 +1,6 @@
 # imds-broker
 
-**imds-broker vends real AWS credentials over a local [IMDSv2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html)-compatible HTTP endpoint, so any tool that expects to be running on EC2 just works — locally.**
+**imds-broker vends AWS credentials over a local [IMDSv2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html)-compatible HTTP endpoint, so any tool that expects to be running on EC2 just works — locally.**
 
 It's for developers running Docker containers, local CLI tools, and AI agents that need AWS access without leaking long-lived credentials into environments where they don't belong. Credentials stay in your AWS config or SSO session on the host. Consumers only ever see short-lived tokens fetched from a URL.
 
@@ -51,19 +51,26 @@ imds-broker sidesteps all of that. The consumer learns a URL. The broker, on the
 
 ## Installation
 
-### Homebrew (macOS)
+<details>
+<summary><strong>Homebrew (macOS)</strong></summary>
 
 ```sh
 brew install jamestelfer/tap/imds-broker
 ```
 
-### npm
+</details>
+
+<details>
+<summary><strong>npm</strong></summary>
 
 ```sh
 npm install -g @jamestelfer/imds-broker
 ```
 
-### mise
+</details>
+
+<details>
+<summary><strong>mise</strong></summary>
 
 [mise](https://mise.jdx.dev/) installs directly from GitHub Releases via the [github backend](https://mise.jdx.dev/dev-tools/backends/github.html):
 
@@ -71,9 +78,14 @@ npm install -g @jamestelfer/imds-broker
 mise use -g github:jamestelfer/imds-broker
 ```
 
-### Manual download
+</details>
+
+<details>
+<summary><strong>Manual download</strong></summary>
 
 Pre-built binaries for Linux, macOS, and Windows (amd64/arm64) are on the [releases page](https://github.com/jamestelfer/imds-broker/releases). Download the archive for your OS and architecture, extract, and place the binary on your `PATH`.
+
+</details>
 
 ## Usage
 
