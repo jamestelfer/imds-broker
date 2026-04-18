@@ -99,3 +99,21 @@ Use these when fetching documentation via the context7 MCP tool:
 | stretchr/testify | `/stretchr/testify` |
 | justinas/alice | `/justinas/alice` |
 | gopkg.in/ini.v1 | `/go-ini/ini` |
+
+---
+
+## Voice
+
+Apply these rules to all documentation (README, plans, PRD), code comments, commit messages, and PR descriptions.
+
+- **Register**: Technical-professional. Use terms directly without over-explanation.
+- **Perspective in guides**: Second person ("you") and imperative mood. Start instructions with the action verb.
+- **Perspective in reference**: Third person and declarative mood. Describe what things are and do.
+- **No first person**: Never use "I" or "we" in any content type.
+- **Directness**: State facts plainly. Make confident recommendations. State limitations without apologising.
+- **No filler**: Never use "Let's dive in", "It's important to note", "As mentioned earlier", or similar padding.
+- **No hedging**: Never use "You might want to consider", "It's generally a good idea", or similar softening.
+- **No rhetorical questions**: State information directly instead of asking "But what does this mean?"
+- **No apologetic language**: Never use "This might seem complicated, but..." or "Don't worry..."
+- **Sentences**: Aim for under 20 words. Single-sentence paragraphs are acceptable.
+- **Spelling**: Use British/Australian English spellings (e.g., "favour", "organise", "colour", "licence" as noun).

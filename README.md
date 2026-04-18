@@ -1,16 +1,53 @@
 # imds-broker
 
-Vends AWS credentials via a local [IMDSv2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html)-compatible HTTP server. Any AWS SDK pointed at it resolves credentials the same way it would on a real EC2 instance — no environment variables, no credential injection.
+**imds-broker vends AWS credentials over a local [IMDSv2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html)-compatible HTTP endpoint, so any tool that expects to be running on EC2 just works — locally.**
 
-It has two primary uses:
+It's for developers running Docker containers, local CLI tools, and AI agents that need AWS access without leaking long-lived credentials into environments where they don't belong. Credentials stay in your AWS config or SSO session on the host. Consumers only ever see short-lived tokens fetched from a URL.
 
-**Alongside containers** — run imds-broker on the host and point containers at it via `AWS_EC2_METADATA_SERVICE_ENDPOINT`. Credentials stay on the host and refresh automatically, so long-running containers or integration test suites never hold stale tokens. Works for any container that uses an AWS SDK.
+```mermaid
+flowchart LR
+    classDef consumer fill:#E8F1FF,stroke:#3B82F6,color:#0B2A4A
+    classDef broker   fill:#FFF4E5,stroke:#F59E0B,color:#4A2E00
+    classDef aws      fill:#E9FBEF,stroke:#10B981,color:#053B24
 
-**Inside an agent** — the MCP server lets an AI assistant start and stop IMDS servers programmatically. This is useful in sandboxed environments where the agent has no shell access to AWS credentials and cannot assume roles directly. The agent calls `create_server` to provision an endpoint, runs its AWS workload, then calls `stop_server` when done. Profile filtering limits which credentials the agent can reach.
+    subgraph Host["Developer machine"]
+      direction LR
+      Creds["~/.aws/config<br/>SSO session"]
+      Serve["imds-broker serve<br/>(single profile)"]:::broker
+      MCP["imds-broker mcp<br/>(create/stop servers)"]:::broker
+      Creds --> Serve
+      Creds --> MCP
+    end
 
-## How it works
+    Container["Docker container<br/>AWS_EC2_METADATA_SERVICE_ENDPOINT"]:::consumer
+    CLI["Local CLI / test suite<br/>AWS_EC2_METADATA_SERVICE_ENDPOINT"]:::consumer
+    Agent["AI agent (Claude, etc.)<br/>MCP client"]:::consumer
 
-imds-broker reads credentials from your AWS config files or SSO session on the host, validates them via STS, and vends them on demand. Static IAM credentials are automatically upgraded to short-lived session tokens before serving.
+    Serve -- IMDSv2 over bridge gateway --> Container
+    Serve -- IMDSv2 over loopback --> CLI
+    Agent -- create_server / stop_server --> MCP
+    MCP -- IMDSv2 endpoint URL --> Agent
+
+    Container --> AWS(("AWS APIs")):::aws
+    CLI --> AWS
+    Agent --> AWS
+```
+
+Three ways to use it:
+
+- **`serve`** — run a single IMDS server for one AWS profile. Point Docker containers or local tools at it via `AWS_EC2_METADATA_SERVICE_ENDPOINT`. This is the primary day-to-day mode.
+- **`mcp`** — expose an MCP stdio server so AI agents can create and stop IMDS servers on demand for specific profiles.
+- **`profiles`** — list the AWS profiles that would be visible to the MCP server, as JSON. Useful for scripting.
+
+## Why
+
+Most local AWS workflows either bake credentials into a container, copy `~/.aws` into an image, or export `AWS_ACCESS_KEY_ID` into a subprocess. That's fine for throwaway work, but:
+
+- SSO credentials expire and have to be re-exported constantly.
+- Static IAM keys leak into shell history, container images, and CI logs.
+- AI agents running in sandboxes often can't run `aws sso login` or assume roles themselves.
+
+imds-broker sidesteps all of that. The consumer learns a URL. The broker, on the host, resolves credentials fresh for every request, upgrading long-lived IAM keys to short-lived STS session tokens before handing anything out.
 
 ## Installation
 
@@ -19,25 +56,6 @@ imds-broker reads credentials from your AWS config files or SSO session on the h
 
 ```sh
 brew install jamestelfer/tap/imds-broker
-```
-
-MCP configuration:
-
-```sh
-claude mcp add imds-broker -- imds-broker mcp
-```
-
-Or add to your MCP config file (`claude_desktop_config.json`, `.cursor/mcp.json`, etc.):
-
-```json
-{
-  "mcpServers": {
-    "imds-broker": {
-      "command": "imds-broker",
-      "args": ["mcp"]
-    }
-  }
-}
 ```
 
 </details>
@@ -49,13 +67,77 @@ Or add to your MCP config file (`claude_desktop_config.json`, `.cursor/mcp.json`
 npm install -g @jamestelfer/imds-broker
 ```
 
-MCP configuration:
+</details>
+
+<details>
+<summary><strong>mise</strong></summary>
+
+[mise](https://mise.jdx.dev/) installs directly from GitHub Releases via the [github backend](https://mise.jdx.dev/dev-tools/backends/github.html):
 
 ```sh
-claude mcp add imds-broker -- imds-broker mcp
+mise use -g github:jamestelfer/imds-broker
 ```
 
-Or add to your MCP config file:
+</details>
+
+<details>
+<summary><strong>Manual download</strong></summary>
+
+Pre-built binaries for Linux, macOS, and Windows (amd64/arm64) are on the [releases page](https://github.com/jamestelfer/imds-broker/releases). Download the archive for your OS and architecture, extract, and place the binary on your `PATH`.
+
+</details>
+
+## Usage
+
+### `serve` — for containers and local tools
+
+Run a single IMDS server for a named AWS profile:
+
+```sh
+imds-broker serve --profile my-profile [--region us-east-1]
+```
+
+On startup the endpoint URL is logged to stderr:
+
+```
+... INFO IMDS server listening url=http://127.0.0.1:PORT profile=my-profile
+```
+
+Point any AWS SDK at it:
+
+```sh
+export AWS_EC2_METADATA_SERVICE_ENDPOINT=http://127.0.0.1:PORT
+aws s3 ls
+```
+
+#### With Docker
+
+The broker listens on all interfaces and auto-discovers the Docker bridge gateway, so containers can reach it without `--network host`. The connection filter still rejects anything outside loopback, the Docker bridge, and your local LAN.
+
+```sh
+# Linux (host network):
+docker run --rm \
+  --network host \
+  -e AWS_EC2_METADATA_SERVICE_ENDPOINT=http://127.0.0.1:PORT \
+  amazon/aws-cli s3 ls
+
+# macOS / Windows (Docker Desktop):
+docker run --rm \
+  -e AWS_EC2_METADATA_SERVICE_ENDPOINT=http://host.docker.internal:PORT \
+  amazon/aws-cli s3 ls
+```
+
+No credentials enter the container — only the endpoint URL.
+
+Use `--quiet` to suppress stderr output. The URL is also written to the log file at `~/.local/state/sandy/logs/imds-broker/`.
+
+### `mcp` — for AI agents
+
+`imds-broker mcp` runs an [MCP](https://modelcontextprotocol.io/) stdio server that exposes three tools: `list_profiles`, `create_server`, and `stop_server`. An agent calls `create_server` with a profile name, receives an endpoint URL, does its work with `AWS_EC2_METADATA_SERVICE_ENDPOINT` set to that URL, and calls `stop_server` when finished.
+
+This lets an agent running in a sandboxed environment — where it has no shell access to AWS credentials and can't assume roles directly — still operate against AWS using whichever profiles the user has pre-approved.
+
+Add to your MCP client config (`claude_desktop_config.json`, `.cursor/mcp.json`, Claude Code, etc.):
 
 ```json
 {
@@ -68,135 +150,44 @@ Or add to your MCP config file:
 }
 ```
 
-</details>
-
-<details>
-<summary><strong>mise</strong></summary>
-
-[mise](https://mise.jdx.dev/) installs directly from GitHub Releases using the [github backend](https://mise.jdx.dev/dev-tools/backends/github.html):
+For Claude Code specifically:
 
 ```sh
-mise use -g github:jamestelfer/imds-broker
+claude mcp add imds-broker -- imds-broker mcp
 ```
 
-MCP configuration:
-
-```sh
-claude mcp add imds-broker -- mise x github:jamestelfer/imds-broker -- imds-broker mcp
-```
-
-Or add to your MCP config file:
-
-```json
-{
-  "mcpServers": {
-    "imds-broker": {
-      "command": "mise",
-      "args": ["x", "github:jamestelfer/imds-broker", "--", "imds-broker", "mcp"]
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary><strong>Manual download</strong></summary>
-
-Pre-built binaries for all platforms are available on the [releases page](https://github.com/jamestelfer/imds-broker/releases). Download the archive for your OS and architecture, extract, and place the binary somewhere on your `PATH`.
-
-| OS      | Arch  | Archive                              |
-|---------|-------|--------------------------------------|
-| Linux   | amd64 | `imds-broker_linux_amd64.tar.gz`    |
-| Linux   | arm64 | `imds-broker_linux_arm64.tar.gz`    |
-| macOS   | amd64 | `imds-broker_darwin_amd64.tar.gz`   |
-| macOS   | arm64 | `imds-broker_darwin_arm64.tar.gz`   |
-| Windows | amd64 | `imds-broker_windows_amd64.zip`     |
-| Windows | arm64 | `imds-broker_windows_arm64.zip`     |
-
-Once installed, configure MCP as above using `claude mcp add` or your MCP config file.
-
-</details>
-
-## Usage
-
-### MCP server (agent integration)
-
-The `mcp` command runs an [MCP](https://modelcontextprotocol.io/) stdio server exposing three tools: `list_profiles`, `create_server`, and `stop_server`. See the install instructions above for MCP configuration.
-
-The agent calls `create_server` with a profile name to get back an endpoint URL, sets `AWS_EC2_METADATA_SERVICE_ENDPOINT` in the environment it's working in, and calls `stop_server` when finished. This works in sandboxed environments where the agent cannot run `aws configure` or assume roles via the CLI.
-
-By default, only profiles matching `ReadOnly|ViewOnly` are exposed. Override with `--profile-filter`:
+By default, only profiles matching the regex `ReadOnly|ViewOnly` are exposed to the agent. Override via flag or env var:
 
 ```sh
 imds-broker mcp --profile-filter "my-team-.*"
-# or via environment variable:
+# or:
 IMDS_BROKER_PROFILE_FILTER="my-team-.*" imds-broker mcp
 ```
 
-### serve (standalone / containers)
+### `profiles` — list available profiles
 
-Starts a single IMDS server for a named AWS profile. Useful for providing credentials to containers during local development or integration testing.
-
-```sh
-imds-broker serve --profile my-profile [--region us-east-1]
-```
-
-On startup it logs the endpoint URL to stderr:
-
-```
-... INFO IMDS server listening url=http://127.0.0.1:PORT profile=my-profile
-```
-
-Point your AWS SDK at it:
-
-```sh
-export AWS_EC2_METADATA_SERVICE_ENDPOINT=http://127.0.0.1:PORT
-aws s3 ls
-```
-
-The server binds to `0.0.0.0`, so containers can reach it on the host. No credentials enter the container — only the endpoint URL does.
-
-```sh
-# Linux (--network host):
-docker run --rm \
-  --network host \
-  -e AWS_EC2_METADATA_SERVICE_ENDPOINT=http://127.0.0.1:PORT \
-  amazon/aws-cli s3 ls
-
-# macOS / Windows (Docker Desktop, host.docker.internal):
-docker run --rm \
-  -e AWS_EC2_METADATA_SERVICE_ENDPOINT=http://host.docker.internal:PORT \
-  amazon/aws-cli s3 ls
-```
-
-Use `--quiet` to suppress stderr output (the URL still appears in the log file at `~/.local/state/sandy/logs/imds-broker/`).
-
-### profiles (list)
-
-Lists AWS profiles matching the filter as a JSON array. Useful for scripting or inspecting what the MCP server will expose.
+Prints profiles matching the filter as a JSON array. Handy for scripts, or for checking what the MCP server would expose before wiring it up to an agent:
 
 ```sh
 imds-broker profiles [--profile-filter REGEX]
 ```
 
-## Strengths
+## How it works
 
-- **No credential env vars** — credentials stay in AWS config files or SSO session on the host; they never enter a container or subprocess environment.
-- **Automatic refresh** — credentials are fetched on demand, so containers running long-lived workloads always receive fresh tokens.
-- **Full IMDSv2 compliance** — works with any AWS SDK that supports EC2 instance credential resolution, including older SDKs that predate newer credential providers.
-- **Connection-filtered** — the token endpoint rejects connections from non-local addresses, reducing the risk of accidental credential exposure over the network.
-- **Profile filtering** — the MCP server limits which credentials an agent can reach via a configurable regex.
-- **STS credential upgrade** — long-lived IAM credentials are automatically wrapped with STS `GetSessionToken` before vending, so clients always receive short-lived tokens.
+- Reads credentials from your local AWS config files or an active SSO session on demand.
+- Validates them via STS on first use.
+- Wraps static IAM credentials with STS `GetSessionToken` so clients always receive short-lived, rotatable tokens.
+- Listens on an ephemeral port on all interfaces, but the listener is fail-closed: connections from anywhere outside loopback, the Docker bridge network, and your LAN are rejected before any HTTP parsing.
+- Fully implements the IMDSv2 token + metadata flow, so any AWS SDK that supports EC2 instance credential resolution works, including older SDKs that pre-date newer credential providers.
 
 ## Caveats
 
-- **AWS credentials must exist on the host** — the broker reads from local AWS config files or an active SSO session; it does not create credentials from nothing.
-- **Ephemeral port** — the server binds to a random available port. You must read the port from stderr (or the log file) and pass it to your container or tool. There is no option to pin a fixed port.
-- **Default profile filter is restrictive** — `ReadOnly|ViewOnly` profiles only. If your profiles don't match this pattern, set `--profile-filter` explicitly (e.g. `--profile-filter ".*"`).
-- **No persistent state** — if the broker process exits, all running servers stop. Clients that cached the endpoint will need to reconnect after restarting the broker.
-- **Mac/Windows Docker networking** — `--network host` is not supported on Docker Desktop; use `host.docker.internal` instead.
+- **AWS credentials must already exist on the host.** The broker reads from local AWS config or an active SSO session; it does not mint credentials from nothing.
+- **Ports are ephemeral.** Each server binds to a random available port. Read it from stderr or the log file and pass it to your container or tool. There is no option to pin a fixed port yet.
+- **Default profile filter is restrictive.** `ReadOnly|ViewOnly` only. If your profiles use different naming, set `--profile-filter` explicitly (e.g. `--profile-filter ".*"`).
+- **No persistent state.** When the broker process exits, all running servers stop. Clients caching the endpoint will need to reconnect after a restart.
+- **Docker Desktop networking.** `--network host` isn't supported on Docker Desktop; use `host.docker.internal` instead. The Linux Docker bridge is discovered automatically.
 
 ## Acknowledgements
 
-The IMDSv2 token design and error handling in this project are derived from Ben Kehoe's [imds-credential-server](https://github.com/benkehoe/imds-credential-server). Thanks to Ben for the original implementation and releasing it for others to discover!
+The IMDSv2 token design and error handling are derived from Ben Kehoe's [imds-credential-server](https://github.com/benkehoe/imds-credential-server). Thanks to Ben for the original implementation and releasing it for others to discover.
