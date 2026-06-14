@@ -20,8 +20,8 @@
     "@jamestelfer/imds-broker-linux-arm64": "0.0.0-dev",
     "@jamestelfer/imds-broker-darwin-x64": "0.0.0-dev",
     "@jamestelfer/imds-broker-darwin-arm64": "0.0.0-dev",
-    "@jamestelfer/imds-broker-windows-x64": "0.0.0-dev",
-    "@jamestelfer/imds-broker-windows-arm64": "0.0.0-dev"
+    "@jamestelfer/imds-broker-win32-x64": "0.0.0-dev",
+    "@jamestelfer/imds-broker-win32-arm64": "0.0.0-dev"
   },
   "engines": {
     "node": ">=18"

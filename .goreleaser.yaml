@@ -34,6 +34,8 @@ changelog:
   sort: asc
 
 release:
+  draft: true
+  use_existing_draft: true
   prerelease: auto
 
 homebrew_casks:

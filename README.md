@@ -52,6 +52,23 @@ imds-broker sidesteps all of that. The consumer learns a URL. The broker, on the
 ## Installation
 
 <details>
+<summary><strong>Install script (Linux, macOS, Windows)</strong></summary>
+
+The install script downloads the correct binary for your platform and verifies its checksum:
+
+```sh
+curl -fsSL https://github.com/jamestelfer/imds-broker/releases/latest/download/install.sh | sh
+```
+
+Set the install directory with `-b`, and pin a version by passing the tag:
+
+```sh
+curl -fsSL https://github.com/jamestelfer/imds-broker/releases/latest/download/install.sh | sh -s -- -b /usr/local/bin v0.3.0
+```
+
+</details>
+
+<details>
 <summary><strong>Homebrew (macOS)</strong></summary>
 
 ```sh
@@ -95,6 +112,16 @@ nix profile install github:jamestelfer/imds-broker
 Pre-built binaries for Linux, macOS, and Windows (amd64/arm64) are on the [releases page](https://github.com/jamestelfer/imds-broker/releases). Download the archive for your OS and architecture, extract, and place the binary on your `PATH`.
 
 </details>
+
+## Verifying releases
+
+Every release is built by GitHub Actions and published with [SLSA build-provenance attestations](https://slsa.dev/). Verify any downloaded artifact against the source repository before use:
+
+```sh
+gh attestation verify imds-broker_linux_amd64.tar.gz --repo jamestelfer/imds-broker
+```
+
+The install script verifies checksums automatically. The checksums file and generated `install.sh` are attested alongside the archives.
 
 ## Usage
 

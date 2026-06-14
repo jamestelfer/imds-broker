@@ -1,48 +1,22 @@
-name: Release
+name: release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
-    name: Release
-    runs-on: ubuntu-latest
-    environment: release
-    permissions:
-      contents: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Read goreleaser version
-        id: tool-versions
-        run: |
-          version=$(grep '^goreleaser' .tool-versions | awk '{print $2}')
-          echo "goreleaser=${version}" >> "$GITHUB_OUTPUT"
-
-      - uses: goreleaser/goreleaser-action@v7
-        with:
-          version: ${{ steps.tool-versions.outputs.goreleaser }}
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_GITHUB_TOKEN: ${{ secrets.HOMEBREW_GITHUB_TOKEN }}
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Publish npm packages
-        run: .github/workflows/npm/publish.sh "${VERSION}"
-        env:
-          VERSION: ${{ github.ref_name }}
+    uses: chinmina/.github/.github/workflows/goreleaser-release.yml@verified-actions
+    with:
+      token-source: octo-sts
+      sts-scope: jamestelfer
+      disable-binstaller: false
+      disable-homebrew: false
+      disable-npm: false
+      npm-package-name: "@jamestelfer/imds-broker"
+    secrets: inherit
