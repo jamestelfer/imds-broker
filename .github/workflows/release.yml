@@ -14,9 +14,6 @@ jobs:
     uses: chinmina/.github/.github/workflows/goreleaser-release.yml@verified-actions
     with:
       token-source: octo-sts
-      sts-scope: jamestelfer
-      disable-binstaller: false
-      disable-homebrew: false
       disable-npm: false
       npm-package-name: "@jamestelfer/imds-broker"
     secrets: inherit
