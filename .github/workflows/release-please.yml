@@ -13,4 +13,3 @@ jobs:
     uses: chinmina/.github/.github/workflows/release-please.yml@verified-actions
     with:
       token-source: octo-sts
-    secrets: inherit

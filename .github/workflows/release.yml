@@ -16,4 +16,3 @@ jobs:
       token-source: octo-sts
       disable-npm: false
       npm-package-name: "@jamestelfer/imds-broker"
-    secrets: inherit
