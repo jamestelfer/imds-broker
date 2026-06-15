@@ -12,8 +12,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/jamestelfer/imds-broker/pkg/profiles"
 )
 
 // Config holds the recognised settings from the protected configuration file.
@@ -27,6 +30,44 @@ type Config struct {
 	// LogLevel is a convenience default; an explicit flag or environment
 	// variable overrides it.
 	LogLevel string `yaml:"log-level"`
+}
+
+// Filter is the effective profile allow-set. A profile is permitted only when
+// it matches both the protected filter (from the configuration file) and any
+// supplied flag or environment filter. The two predicates are evaluated as a
+// logical AND of compiled regexes; a supplied filter can only narrow, never
+// widen, the protected filter.
+type Filter struct {
+	protected *regexp.Regexp
+	supplied  *regexp.Regexp
+}
+
+// NewFilter composes the protected filter with a supplied flag/env filter.
+//
+// Where the configuration omits the protected filter and no filter is supplied,
+// the supplied predicate falls back to profiles.DefaultFilter. An empty filter
+// otherwise imposes no constraint on its side of the AND, so a present protected
+// filter alone restricts the set and a supplied filter alone restricts the set.
+// Returns an error if either value is not a valid regular expression.
+func NewFilter(protected, supplied string) (*Filter, error) {
+	if protected == "" && supplied == "" {
+		supplied = profiles.DefaultFilter
+	}
+	pr, err := regexp.Compile(protected)
+	if err != nil {
+		return nil, fmt.Errorf("invalid protected profile filter %q: %w", protected, err)
+	}
+	sr, err := regexp.Compile(supplied)
+	if err != nil {
+		return nil, fmt.Errorf("invalid profile filter %q: %w", supplied, err)
+	}
+	return &Filter{protected: pr, supplied: sr}, nil
+}
+
+// Allowed reports whether name is permitted by both the protected and supplied
+// predicates.
+func (f *Filter) Allowed(name string) bool {
+	return f.protected.MatchString(name) && f.supplied.MatchString(name)
 }
 
 // ResolvePath returns the fixed configuration path

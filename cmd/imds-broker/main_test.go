@@ -70,6 +70,46 @@ func TestRunProfiles_NoConfigUsesDefaultFilter(t *testing.T) {
 	assert.Equal(t, []string{"dev-ViewOnly", "prod-ReadOnly"}, profileNames(t, buf.Bytes()))
 }
 
+func TestRunProfiles_IntersectsConfigAndSuppliedFilter(t *testing.T) {
+	writeAWSConfig(t, `
+[profile prod-ReadOnly]
+region = us-east-1
+
+[profile prod-Admin]
+region = us-east-1
+
+[profile dev-ReadOnly]
+region = us-east-1
+`)
+
+	var buf bytes.Buffer
+	err := runProfiles(context.Background(), brokerconfig.Config{ProfileFilter: "prod"}, "ReadOnly", &buf)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"prod-ReadOnly"}, profileNames(t, buf.Bytes()))
+}
+
+func TestRunProfiles_SuppliedFilterCannotWidenProtected(t *testing.T) {
+	writeAWSConfig(t, profilesFixture)
+
+	var buf bytes.Buffer
+	// Protected ReadOnly + supplied ".*" must still yield only ReadOnly.
+	err := runProfiles(context.Background(), brokerconfig.Config{ProfileFilter: "ReadOnly"}, ".*", &buf)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"prod-ReadOnly"}, profileNames(t, buf.Bytes()))
+}
+
+func TestRunProfiles_SuppliedFilterAloneWhenConfigOmitsIt(t *testing.T) {
+	writeAWSConfig(t, profilesFixture)
+
+	var buf bytes.Buffer
+	err := runProfiles(context.Background(), brokerconfig.Config{}, "admin", &buf)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"admin"}, profileNames(t, buf.Bytes()))
+}
+
 func TestOpenLogFile_CreatesDirectoryAndReturnsWriter(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", dir)

@@ -141,18 +141,25 @@ func profilesCommand() *cli.Command {
 	}
 }
 
-// runProfiles lists AWS profiles restricted by the protected filter and writes
-// them as indented JSON to w. The protected filter is authoritative when
-// present; a supplied flag filter is composed with it in Phase 2.
+// runProfiles lists AWS profiles restricted by the effective allow-set — the
+// intersection of the protected filter and any supplied flag filter — and
+// writes them as indented JSON to w.
 func runProfiles(ctx context.Context, cfg brokerconfig.Config, suppliedFilter string, w io.Writer) error {
-	filter := suppliedFilter
-	if cfg.ProfileFilter != "" {
-		filter = cfg.ProfileFilter
-	}
-
-	names, err := profiles.List(ctx, filter)
+	filter, err := brokerconfig.NewFilter(cfg.ProfileFilter, suppliedFilter)
 	if err != nil {
 		return err
+	}
+
+	all, err := profiles.List(ctx, ".*")
+	if err != nil {
+		return err
+	}
+
+	var names []profiles.Profile
+	for _, p := range all {
+		if filter.Allowed(p.Name) {
+			names = append(names, p)
+		}
 	}
 
 	enc := json.NewEncoder(w)

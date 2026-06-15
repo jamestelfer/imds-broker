@@ -67,6 +67,52 @@ func TestLoad_MalformedFileReturnsError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestFilter_Composition(t *testing.T) {
+	// names spanning the protected/supplied/default dimensions.
+	names := []string{"Prod-ReadOnly", "Prod-Admin", "Dev-ReadOnly", "Dev-ViewOnly", "admin"}
+
+	allowed := func(t *testing.T, protected, supplied string) []string {
+		t.Helper()
+		f, err := NewFilter(protected, supplied)
+		require.NoError(t, err)
+		var got []string
+		for _, n := range names {
+			if f.Allowed(n) {
+				got = append(got, n)
+			}
+		}
+		return got
+	}
+
+	t.Run("protected only restricts to its matches", func(t *testing.T) {
+		assert.Equal(t, []string{"Prod-ReadOnly", "Prod-Admin"}, allowed(t, "Prod", ""))
+	})
+
+	t.Run("supplied narrows the protected set (intersection)", func(t *testing.T) {
+		assert.Equal(t, []string{"Prod-ReadOnly"}, allowed(t, "Prod", "ReadOnly"))
+	})
+
+	t.Run("supplied .* cannot widen the protected filter", func(t *testing.T) {
+		assert.Equal(t, []string{"Prod-ReadOnly", "Dev-ReadOnly"}, allowed(t, "ReadOnly", ".*"))
+	})
+
+	t.Run("no protected filter applies the supplied filter alone", func(t *testing.T) {
+		assert.Equal(t, []string{"admin"}, allowed(t, "", "admin"))
+	})
+
+	t.Run("no filter at all falls back to DefaultFilter", func(t *testing.T) {
+		assert.Equal(t, []string{"Prod-ReadOnly", "Dev-ReadOnly", "Dev-ViewOnly"}, allowed(t, "", ""))
+	})
+}
+
+func TestNewFilter_InvalidRegexReturnsError(t *testing.T) {
+	_, err := NewFilter("(", "")
+	require.Error(t, err)
+
+	_, err = NewFilter("", "(")
+	require.Error(t, err)
+}
+
 // writeConfig writes content to a temp file and returns its path.
 func writeConfig(t *testing.T, content string) string {
 	t.Helper()
