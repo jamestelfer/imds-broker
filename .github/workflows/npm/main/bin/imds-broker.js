@@ -8,8 +8,8 @@ const platforms = {
   'linux-arm64':  '@jamestelfer/imds-broker-linux-arm64',
   'darwin-x64':   '@jamestelfer/imds-broker-darwin-x64',
   'darwin-arm64': '@jamestelfer/imds-broker-darwin-arm64',
-  'win32-x64':    '@jamestelfer/imds-broker-windows-x64',
-  'win32-arm64':  '@jamestelfer/imds-broker-windows-arm64',
+  'win32-x64':    '@jamestelfer/imds-broker-win32-x64',
+  'win32-arm64':  '@jamestelfer/imds-broker-win32-arm64',
 };
 
 const key = `${process.platform}-${process.arch}`;

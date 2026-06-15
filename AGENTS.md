@@ -14,7 +14,7 @@ Implementation plan: `plans/imds-broker.md`
 | Concern | Decision |
 |---|---|
 | Language | Go 1.26 |
-| Dependency / toolchain management | mise (`.tool-versions`) |
+| Dependency / toolchain management | mise (`mise.toml`) |
 | Command runner | just (`justfile`) |
 | CLI framework | urfave/cli v3 |
 | HTTP middleware | justinas/alice |
