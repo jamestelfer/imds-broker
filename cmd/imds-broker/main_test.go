@@ -2,14 +2,73 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/jamestelfer/imds-broker/pkg/brokerconfig"
+	"github.com/jamestelfer/imds-broker/pkg/profiles"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// writeAWSConfig writes a fake ~/.aws/config, points AWS_CONFIG_FILE at it, and
+// directs AWS_SHARED_CREDENTIALS_FILE at a nonexistent path so no real
+// credentials file is read during tests.
+func writeAWSConfig(t *testing.T, content string) {
+	t.Helper()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config")
+	require.NoError(t, os.WriteFile(configPath, []byte(content), 0o600))
+	t.Setenv("AWS_CONFIG_FILE", configPath)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(dir, "credentials_nonexistent"))
+}
+
+const profilesFixture = `
+[profile prod-ReadOnly]
+region = us-east-1
+
+[profile dev-ViewOnly]
+region = us-east-1
+
+[profile admin]
+region = us-east-1
+`
+
+// profileNames decodes the JSON written by runProfiles into a name slice.
+func profileNames(t *testing.T, raw []byte) []string {
+	t.Helper()
+	var ps []profiles.Profile
+	require.NoError(t, json.Unmarshal(raw, &ps))
+	names := make([]string, len(ps))
+	for i, p := range ps {
+		names[i] = p.Name
+	}
+	return names
+}
+
+func TestRunProfiles_ConfigFilterIsAuthoritative(t *testing.T) {
+	writeAWSConfig(t, profilesFixture)
+
+	var buf bytes.Buffer
+	err := runProfiles(context.Background(), brokerconfig.Config{ProfileFilter: "admin"}, "", &buf)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"admin"}, profileNames(t, buf.Bytes()))
+}
+
+func TestRunProfiles_NoConfigUsesDefaultFilter(t *testing.T) {
+	writeAWSConfig(t, profilesFixture)
+
+	var buf bytes.Buffer
+	err := runProfiles(context.Background(), brokerconfig.Config{}, "", &buf)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"dev-ViewOnly", "prod-ReadOnly"}, profileNames(t, buf.Bytes()))
+}
 
 func TestOpenLogFile_CreatesDirectoryAndReturnsWriter(t *testing.T) {
 	dir := t.TempDir()

@@ -20,6 +20,7 @@ import (
 
 	"github.com/jamestelfer/imds-broker/pkg/awscreds"
 	"github.com/jamestelfer/imds-broker/pkg/broker"
+	"github.com/jamestelfer/imds-broker/pkg/brokerconfig"
 	"github.com/jamestelfer/imds-broker/pkg/imdsserver"
 	"github.com/jamestelfer/imds-broker/pkg/mcpserver"
 	"github.com/jamestelfer/imds-broker/pkg/profiles"
@@ -48,6 +49,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// loadBrokerConfig resolves the fixed protected configuration path and loads
+// it. A missing file yields a zero-value config; an unreadable or unparseable
+// file returns an error so the command fails closed.
+func loadBrokerConfig() (brokerconfig.Config, error) {
+	path, err := brokerconfig.ResolvePath()
+	if err != nil {
+		return brokerconfig.Config{}, err
+	}
+	return brokerconfig.Load(path)
 }
 
 // resolveLogDir returns the log directory path using XDG_STATE_HOME if set,
@@ -120,18 +132,32 @@ func profilesCommand() *cli.Command {
 			profileFilterFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			filter := cmd.String("profile-filter")
-
-			names, err := profiles.List(ctx, filter)
+			cfg, err := loadBrokerConfig()
 			if err != nil {
 				return err
 			}
-
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(names)
+			return runProfiles(ctx, cfg, cmd.String("profile-filter"), os.Stdout)
 		},
 	}
+}
+
+// runProfiles lists AWS profiles restricted by the protected filter and writes
+// them as indented JSON to w. The protected filter is authoritative when
+// present; a supplied flag filter is composed with it in Phase 2.
+func runProfiles(ctx context.Context, cfg brokerconfig.Config, suppliedFilter string, w io.Writer) error {
+	filter := suppliedFilter
+	if cfg.ProfileFilter != "" {
+		filter = cfg.ProfileFilter
+	}
+
+	names, err := profiles.List(ctx, filter)
+	if err != nil {
+		return err
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(names)
 }
 
 // credentialProvider returns a provider that vends the credentials for cfg.
