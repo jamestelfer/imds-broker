@@ -16,4 +16,4 @@ Mark a phase complete only after its acceptance criteria are reviewed and verifi
 
 Concise, agent-facing notes only: decisions made and solutions to problems that a later phase needs to succeed. Omit anything not required for subsequent work.
 
-- P0: the session-resume `just build failed` was environmental (mise toolchain not ready at hook time), not a code break. `just verify` passes once the toolchain is up. No stabilization needed.
+_None yet._
