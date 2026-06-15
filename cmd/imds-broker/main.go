@@ -234,9 +234,12 @@ func mcpCommand() *cli.Command {
 			}
 			defer func() { _ = lw.Close() }()
 
-			filter := cmd.String("profile-filter")
+			cfg, err := loadBrokerConfig()
+			if err != nil {
+				return err
+			}
 
-			pf, err := mcpserver.NewProfileFilter(filter)
+			pf, err := brokerconfig.NewFilter(cfg.ProfileFilter, cmd.String("profile-filter"))
 			if err != nil {
 				return fmt.Errorf("mcp: invalid profile filter: %w", err)
 			}
@@ -302,6 +305,20 @@ func serveCommand() *cli.Command {
 
 			profile := cmd.String("profile")
 			region := cmd.String("region")
+
+			// Gate the requested profile against the protected filter before
+			// any AWS call, so a disallowed profile aborts startup.
+			brokerCfg, err := loadBrokerConfig()
+			if err != nil {
+				return err
+			}
+			filter, err := brokerconfig.NewFilter(brokerCfg.ProfileFilter, "")
+			if err != nil {
+				return fmt.Errorf("serve: invalid profile filter: %w", err)
+			}
+			if !filter.Allowed(profile) {
+				return fmt.Errorf("serve: profile %q is not permitted by the configured filter", profile)
+			}
 
 			// Cancel on SIGINT/SIGTERM.
 			ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
