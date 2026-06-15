@@ -10,7 +10,7 @@ Mark a phase complete only after its acceptance criteria are reviewed and verifi
 - [x] **Phase 1 — Config loader + fixed path, `profiles` honours the protected filter** (R1–R8, R12)
 - [x] **Phase 2 — Filter intersection and no-widening** (R9–R11)
 - [x] **Phase 3 — Apply the enforced filter to MCP and `serve`** (R13–R15)
-- [ ] **Phase 4 — Overridable defaults via `cli-altsrc`** (R16–R19)
+- [x] **Phase 4 — Overridable defaults via `cli-altsrc`** (R16–R19)
 
 ## Lessons learned
 

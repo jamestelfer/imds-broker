@@ -15,6 +15,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	altsrc "github.com/urfave/cli-altsrc/v3"
+	altsrcyaml "github.com/urfave/cli-altsrc/v3/yaml"
 	"github.com/urfave/cli/v3"
 	"gopkg.in/natefinch/lumberjack.v2"
 
@@ -27,18 +29,27 @@ import (
 )
 
 func main() {
+	// The configuration path is fixed and used both by the custom loader (for
+	// the enforced filter) and by cli-altsrc (for overridable defaults).
+	configPath, err := brokerconfig.ResolvePath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
 	app := &cli.Command{
 		Name:  "imds-broker",
 		Usage: "Serve AWS credentials via the EC2 IMDSv2 protocol",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:  "log-level",
-				Value: "info",
-				Usage: "log level: debug, info, warn, error",
+				Name:    "log-level",
+				Value:   "info",
+				Usage:   "log level: debug, info, warn, error",
+				Sources: logLevelSources(configPath),
 			},
 		},
 		Commands: []*cli.Command{
-			serveCommand(),
+			serveCommand(configPath),
 			profilesCommand(),
 			mcpCommand(),
 			versionCommand(),
@@ -49,6 +60,24 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// logLevelSources supplies the overridable default for --log-level from the
+// config file, beneath the environment variable. Precedence: explicit flag >
+// IMDS_BROKER_LOG_LEVEL > config file > built-in default.
+func logLevelSources(configPath string) cli.ValueSourceChain {
+	return cli.NewValueSourceChain(
+		cli.EnvVar("IMDS_BROKER_LOG_LEVEL"),
+		altsrcyaml.YAML("log-level", altsrc.StringSourcer(configPath)),
+	)
+}
+
+// regionSources supplies the overridable default for serve --region from the
+// config file. Precedence: explicit flag > config file > profile-configured.
+func regionSources(configPath string) cli.ValueSourceChain {
+	return cli.NewValueSourceChain(
+		altsrcyaml.YAML("region", altsrc.StringSourcer(configPath)),
+	)
 }
 
 // loadBrokerConfig resolves the fixed protected configuration path and loads
@@ -273,7 +302,7 @@ func mcpCommand() *cli.Command {
 	}
 }
 
-func serveCommand() *cli.Command {
+func serveCommand(configPath string) *cli.Command {
 	return &cli.Command{
 		Name:  "serve",
 		Usage: "Start an IMDS server for a single AWS profile",
@@ -284,8 +313,9 @@ func serveCommand() *cli.Command {
 				Required: true,
 			},
 			&cli.StringFlag{
-				Name:  "region",
-				Usage: "AWS region (defaults to the profile-configured region)",
+				Name:    "region",
+				Usage:   "AWS region (defaults to the profile-configured region)",
+				Sources: regionSources(configPath),
 			},
 			&cli.BoolFlag{
 				Name:  "quiet",

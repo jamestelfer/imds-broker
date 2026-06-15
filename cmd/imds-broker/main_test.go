@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/urfave/cli/v3"
+
 	"github.com/jamestelfer/imds-broker/pkg/brokerconfig"
 	"github.com/jamestelfer/imds-broker/pkg/profiles"
 	"github.com/stretchr/testify/assert"
@@ -138,6 +140,71 @@ func TestOpenLogFile_FilenameContainsCmdNameAndPID(t *testing.T) {
 	expected := filepath.Join(dir, "sandy", "logs", "imds-broker",
 		fmt.Sprintf("serve-%d.log", os.Getpid()))
 	assert.FileExists(t, expected)
+}
+
+// resolveFlag builds a single-flag command using the given source chain and a
+// no-op action, runs it with args, and returns the resolved flag value.
+func resolveFlag(t *testing.T, name, def string, sources cli.ValueSourceChain, args ...string) string {
+	t.Helper()
+	var got string
+	cmd := &cli.Command{
+		Name: "test",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: name, Value: def, Sources: sources},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			got = cmd.String(name)
+			return nil
+		},
+	}
+	require.NoError(t, cmd.Run(context.Background(), append([]string{"test"}, args...)))
+	return got
+}
+
+func writeBrokerConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	return path
+}
+
+func TestLogLevelSources_FileValueWhenFlagUnset(t *testing.T) {
+	path := writeBrokerConfig(t, "log-level: debug\n")
+	assert.Equal(t, "debug", resolveFlag(t, "log-level", "info", logLevelSources(path)))
+}
+
+func TestLogLevelSources_FlagOverridesFile(t *testing.T) {
+	path := writeBrokerConfig(t, "log-level: debug\n")
+	assert.Equal(t, "error", resolveFlag(t, "log-level", "info", logLevelSources(path), "--log-level", "error"))
+}
+
+func TestLogLevelSources_EnvOverridesFile(t *testing.T) {
+	t.Setenv("IMDS_BROKER_LOG_LEVEL", "warn")
+	path := writeBrokerConfig(t, "log-level: debug\n")
+	assert.Equal(t, "warn", resolveFlag(t, "log-level", "info", logLevelSources(path)))
+}
+
+func TestLogLevelSources_AbsentFileUsesDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.yaml")
+	assert.Equal(t, "info", resolveFlag(t, "log-level", "info", logLevelSources(path)))
+}
+
+func TestRegionSources_FileValueWhenFlagUnset(t *testing.T) {
+	path := writeBrokerConfig(t, "region: ap-southeast-2\n")
+	assert.Equal(t, "ap-southeast-2", resolveFlag(t, "region", "", regionSources(path)))
+}
+
+func TestRegionSources_FlagOverridesFile(t *testing.T) {
+	path := writeBrokerConfig(t, "region: ap-southeast-2\n")
+	assert.Equal(t, "us-east-1", resolveFlag(t, "region", "", regionSources(path), "--region", "us-east-1"))
+}
+
+func TestNewCommandLogger_InvalidLevelFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+
+	_, _, err := newCommandLogger("serve", "bogus", nil)
+	require.Error(t, err)
 }
 
 func TestResolveLogDir_UsesXDGStateHome(t *testing.T) {

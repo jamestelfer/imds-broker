@@ -9,6 +9,7 @@ require (
 	github.com/justinas/alice v1.2.0
 	github.com/mark3labs/mcp-go v0.47.0
 	github.com/stretchr/testify v1.11.1
+	github.com/urfave/cli-altsrc/v3 v3.1.0
 	github.com/urfave/cli/v3 v3.8.0
 	gopkg.in/ini.v1 v1.67.1
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
