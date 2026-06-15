@@ -6,7 +6,7 @@ Mark a phase complete only after its acceptance criteria are reviewed and verifi
 
 ## Phases
 
-- [ ] **P0 — Baseline**: `just verify` green before Phase 1.
+- [x] **P0 — Baseline**: `just verify` green before Phase 1.
 - [ ] **Phase 1 — Config loader + fixed path, `profiles` honours the protected filter** (R1–R8, R12)
 - [ ] **Phase 2 — Filter intersection and no-widening** (R9–R11)
 - [ ] **Phase 3 — Apply the enforced filter to MCP and `serve`** (R13–R15)
@@ -16,4 +16,4 @@ Mark a phase complete only after its acceptance criteria are reviewed and verifi
 
 Concise, agent-facing notes only: decisions made and solutions to problems that a later phase needs to succeed. Omit anything not required for subsequent work.
 
-_None yet._
+- P0: the resumed-container `just build failed` was an empty Go module cache, not a code defect. `just build` triggers the dependency download; `just verify` is green afterwards. No source change needed.
