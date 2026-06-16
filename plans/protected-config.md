@@ -2,30 +2,30 @@
 
 ## Problem Statement
 
-IMDS Broker vends AWS credentials to tooling, including AI agents that drive the `mcp` command. The profile filter is the primary blast-radius control: it limits which profiles an agent can request credentials for. Today that filter is set via the `--profile-filter` flag or the `IMDS_BROKER_PROFILE_FILTER` environment variable. Both live on the command line that the agent — or whatever launches the broker — controls. An agent that can set its own flags can set `--profile-filter '.*'` and reach every profile, defeating the control.
+IMDS Broker vends AWS credentials to tooling, including AI agents that drive the `mcp` command. The profile filter, region, and log level are set on the command line via flags or `IMDS_BROKER_*` environment variables. Re-specifying them on every invocation is tedious and error-prone, and there is no persistent place to set them once.
 
-The filter needs a source the agent cannot rewrite. It must also stay simple: a control that is awkward to configure will not be deployed, and an undeployed control protects nothing.
+A configured filter should also act as a baseline that ad-hoc flags refine rather than replace. The mechanism must stay simple: a control that is awkward to configure will not be deployed, and an undeployed control helps no one.
 
 ## Solution
 
-Add a protected configuration file at a fixed, well-known path outside the broker's command line. The file lives in the host's XDG config directory, where a sandboxed agent's filesystem view does not expose it. The operator writes it once; the broker reads it on every invocation.
+Add a configuration file at a fixed, well-known path in the host's XDG config directory. The operator writes it once; the broker reads it on every invocation.
 
 The file carries two kinds of settings:
 
-- **Enforced** — the `profile-filter`. The file's filter is authoritative. A CLI or environment filter may only *narrow* it (a profile is permitted when it matches both). Nothing on the command line can widen it.
+- **Baseline** — the `profile-filter`. The file's filter is authoritative. A CLI or environment filter may only *narrow* it (a profile is permitted when it matches both). Nothing on the command line widens it, so the configured scope is a ceiling rather than something each invocation replaces.
 - **Defaults** — `region` and `log-level`. These are convenience defaults. An explicit flag or environment variable overrides them.
 
-Trust derives solely from the path. The broker performs no ownership or permission checks on the file — those add setup friction without adding protection when the path itself is outside the agent's reach. When the agent cannot write the fixed path, the enforced filter holds. When the agent fully controls the host (including that path), the feature degrades to convenience defaults and offers no guarantee; that boundary is the operator's to enforce through sandboxing.
+Trust derives solely from the path. The broker performs no ownership or permission checks on the file — those add setup friction for little gain. The fixed path keeps the configured filter from being widened by a stray command-line flag; this is a convenience guardrail, not a hard security boundary. On a host the agent fully controls (including that path), the file sits inside the agent's trust boundary and provides defaults only.
 
-## Security Model
+## Trust and Deployment Model
 
 | Aspect | Decision |
 |---|---|
 | Trust basis | Fixed path only. No ownership, mode, or signature checks. |
 | Path | `${XDG_CONFIG_HOME:-$HOME/.config}/imds-broker/config.yaml`. Fixed; not overridable by flag or environment variable. |
-| Threat addressed | An agent that controls the broker's command line widening the profile filter to reach disallowed profiles. |
-| Guarantee holds when | The protected path is outside the agent's write access (broker sandboxed from the agent, or the config directory is read-only to it). |
-| Guarantee does not hold when | The agent can write the protected path (fully agent-controlled host). The feature then provides defaults only. |
+| Intent | Convenience: a persistent filter and defaults, set once. The fixed path also stops an ad-hoc flag from widening the configured filter. |
+| Deployment model | The agent drives the broker as an MCP server, running outside its sandbox. The sandbox is configured so AWS credentials cannot be used from within it. `serve` is a standalone path, not an agent one. |
+| Not a security boundary | On a host the agent fully controls (including the config path), the file provides defaults only and offers no guarantee. |
 | Complementary control | `~/.aws` must be off-limits to the agent. Otherwise the agent reads credentials directly and bypasses the broker entirely. Out of scope for this feature; an operator deployment requirement. |
 
 ## Requirements
@@ -103,6 +103,7 @@ Configuration is loaded once at command startup. There is no hot-reload; a runni
 
 ## Further Notes
 
-- The enforced `profile-filter` extends the existing `ReadOnly|ViewOnly` default safety net into a control an agent cannot loosen from its command line.
+- The configured `profile-filter` extends the existing `ReadOnly|ViewOnly` default into a baseline that ad-hoc flags narrow but never widen.
 - The fixed-path, no-checks design is a deliberate trade against setup friction: a control that is trivial to deploy is more likely to be deployed than one gated on correct file ownership and modes.
-- When the agent both launches the MCP host and controls the host filesystem, the protected file sits inside the agent's trust boundary and provides defaults only. Document this so operators do not over-trust the control in agent-controlled environments.
+- The broker is used by an agent as an MCP server, running outside the sandbox. `serve` is a human/standalone path; because the sandbox prevents credential use from within it, `serve` is not part of the agent workflow. The filter applies to `serve` for consistency, not as an agent defence.
+- On a host the agent fully controls, the file sits inside the agent's trust boundary and provides defaults only. Operators should not over-trust the control in agent-controlled environments.
