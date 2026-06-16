@@ -2,6 +2,9 @@
 /dist/
 /bin/
 
+# Nix build result symlink
+/result
+
 # IDE
 .idea
 .vscode
