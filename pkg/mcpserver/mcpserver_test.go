@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/jamestelfer/imds-broker/pkg/broker"
+	"github.com/jamestelfer/imds-broker/pkg/brokerconfig"
 	"github.com/jamestelfer/imds-broker/pkg/mcpserver"
 	"github.com/jamestelfer/imds-broker/pkg/profiles"
 )
@@ -265,6 +266,38 @@ func TestCreateServer_DefaultFilter_RejectsUnmatchedProfile(t *testing.T) {
 	result := callTool(t, c, "create_server", map[string]any{"profile": "admin-prod"})
 
 	assert.True(t, result.IsError)
+}
+
+// TestComposedFilter_GatesListAndCreate verifies that a brokerconfig-composed
+// filter works as the MCP gate: list_profiles is restricted to the allow-set
+// and create_server rejects a disallowed profile while permitting an allowed
+// one (R13, R14).
+func TestComposedFilter_GatesListAndCreate(t *testing.T) {
+	filter, err := brokerconfig.NewFilter("Prod", "")
+	require.NoError(t, err)
+	lister := func(_ context.Context) ([]profiles.Profile, error) {
+		return []profiles.Profile{{Name: "Prod-ReadOnly"}, {Name: "Dev-ReadOnly"}}, nil
+	}
+	b := &fakeBroker{createResult: broker.CreateResult{LocalURL: "http://127.0.0.1:12345"}}
+	s := mcpserver.New(mcpserver.Options{
+		Broker:       b,
+		ListProfiles: lister,
+		Filter:       filter,
+		Logger:       discardLogger(),
+	})
+	c := newTestClient(t, s)
+
+	list := callTool(t, c, "list_profiles", nil)
+	require.False(t, list.IsError)
+	text := firstText(t, list)
+	assert.Contains(t, text, "Prod-ReadOnly")
+	assert.NotContains(t, text, "Dev-ReadOnly")
+
+	rejected := callTool(t, c, "create_server", map[string]any{"profile": "Dev-ReadOnly"})
+	assert.True(t, rejected.IsError)
+
+	allowed := callTool(t, c, "create_server", map[string]any{"profile": "Prod-ReadOnly"})
+	assert.False(t, allowed.IsError)
 }
 
 // Test 4: stop_server returns success for a known URL.

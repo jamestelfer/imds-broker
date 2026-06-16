@@ -15,29 +15,41 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	altsrc "github.com/urfave/cli-altsrc/v3"
+	altsrcyaml "github.com/urfave/cli-altsrc/v3/yaml"
 	"github.com/urfave/cli/v3"
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/jamestelfer/imds-broker/pkg/awscreds"
 	"github.com/jamestelfer/imds-broker/pkg/broker"
+	"github.com/jamestelfer/imds-broker/pkg/brokerconfig"
 	"github.com/jamestelfer/imds-broker/pkg/imdsserver"
 	"github.com/jamestelfer/imds-broker/pkg/mcpserver"
 	"github.com/jamestelfer/imds-broker/pkg/profiles"
 )
 
 func main() {
+	// The configuration path is fixed and used both by the custom loader (for
+	// the enforced filter) and by cli-altsrc (for overridable defaults).
+	configPath, err := brokerconfig.ResolvePath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
 	app := &cli.Command{
 		Name:  "imds-broker",
 		Usage: "Serve AWS credentials via the EC2 IMDSv2 protocol",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:  "log-level",
-				Value: "info",
-				Usage: "log level: debug, info, warn, error",
+				Name:    "log-level",
+				Value:   "info",
+				Usage:   "log level: debug, info, warn, error",
+				Sources: logLevelSources(configPath),
 			},
 		},
 		Commands: []*cli.Command{
-			serveCommand(),
+			serveCommand(configPath),
 			profilesCommand(),
 			mcpCommand(),
 			versionCommand(),
@@ -48,6 +60,35 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// logLevelSources supplies the overridable default for --log-level from the
+// config file, beneath the environment variable. Precedence: explicit flag >
+// IMDS_BROKER_LOG_LEVEL > config file > built-in default.
+func logLevelSources(configPath string) cli.ValueSourceChain {
+	return cli.NewValueSourceChain(
+		cli.EnvVar("IMDS_BROKER_LOG_LEVEL"),
+		altsrcyaml.YAML("log-level", altsrc.StringSourcer(configPath)),
+	)
+}
+
+// regionSources supplies the overridable default for serve --region from the
+// config file. Precedence: explicit flag > config file > profile-configured.
+func regionSources(configPath string) cli.ValueSourceChain {
+	return cli.NewValueSourceChain(
+		altsrcyaml.YAML("region", altsrc.StringSourcer(configPath)),
+	)
+}
+
+// loadBrokerConfig resolves the fixed protected configuration path and loads
+// it. A missing file yields a zero-value config; an unreadable or unparseable
+// file returns an error so the command fails closed.
+func loadBrokerConfig() (brokerconfig.Config, error) {
+	path, err := brokerconfig.ResolvePath()
+	if err != nil {
+		return brokerconfig.Config{}, err
+	}
+	return brokerconfig.Load(path)
 }
 
 // resolveLogDir returns the log directory path using XDG_STATE_HOME if set,
@@ -120,18 +161,39 @@ func profilesCommand() *cli.Command {
 			profileFilterFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			filter := cmd.String("profile-filter")
-
-			names, err := profiles.List(ctx, filter)
+			cfg, err := loadBrokerConfig()
 			if err != nil {
 				return err
 			}
-
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(names)
+			return runProfiles(ctx, cfg, cmd.String("profile-filter"), os.Stdout)
 		},
 	}
+}
+
+// runProfiles lists AWS profiles restricted by the effective allow-set — the
+// intersection of the protected filter and any supplied flag filter — and
+// writes them as indented JSON to w.
+func runProfiles(ctx context.Context, cfg brokerconfig.Config, suppliedFilter string, w io.Writer) error {
+	filter, err := brokerconfig.NewFilter(cfg.ProfileFilter, suppliedFilter)
+	if err != nil {
+		return err
+	}
+
+	all, err := profiles.List(ctx, ".*")
+	if err != nil {
+		return err
+	}
+
+	var names []profiles.Profile
+	for _, p := range all {
+		if filter.Allowed(p.Name) {
+			names = append(names, p)
+		}
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(names)
 }
 
 // credentialProvider returns a provider that vends the credentials for cfg.
@@ -201,9 +263,12 @@ func mcpCommand() *cli.Command {
 			}
 			defer func() { _ = lw.Close() }()
 
-			filter := cmd.String("profile-filter")
+			cfg, err := loadBrokerConfig()
+			if err != nil {
+				return err
+			}
 
-			pf, err := mcpserver.NewProfileFilter(filter)
+			pf, err := brokerconfig.NewFilter(cfg.ProfileFilter, cmd.String("profile-filter"))
 			if err != nil {
 				return fmt.Errorf("mcp: invalid profile filter: %w", err)
 			}
@@ -237,7 +302,7 @@ func mcpCommand() *cli.Command {
 	}
 }
 
-func serveCommand() *cli.Command {
+func serveCommand(configPath string) *cli.Command {
 	return &cli.Command{
 		Name:  "serve",
 		Usage: "Start an IMDS server for a single AWS profile",
@@ -248,8 +313,9 @@ func serveCommand() *cli.Command {
 				Required: true,
 			},
 			&cli.StringFlag{
-				Name:  "region",
-				Usage: "AWS region (defaults to the profile-configured region)",
+				Name:    "region",
+				Usage:   "AWS region (defaults to the profile-configured region)",
+				Sources: regionSources(configPath),
 			},
 			&cli.BoolFlag{
 				Name:  "quiet",
@@ -269,6 +335,20 @@ func serveCommand() *cli.Command {
 
 			profile := cmd.String("profile")
 			region := cmd.String("region")
+
+			// Gate the requested profile against the protected filter before
+			// any AWS call, so a disallowed profile aborts startup.
+			brokerCfg, err := loadBrokerConfig()
+			if err != nil {
+				return err
+			}
+			filter, err := brokerconfig.NewFilter(brokerCfg.ProfileFilter, "")
+			if err != nil {
+				return fmt.Errorf("serve: invalid profile filter: %w", err)
+			}
+			if !filter.Allowed(profile) {
+				return fmt.Errorf("serve: profile %q is not permitted by the configured filter", profile)
+			}
 
 			// Cancel on SIGINT/SIGTERM.
 			ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
