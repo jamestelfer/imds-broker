@@ -58,6 +58,9 @@ type Options struct {
 	ListProfiles ProfileLister
 	Filter       ProfileFilter
 	Logger       *slog.Logger
+	// DefaultRegion is applied to create_server when the tool call omits a
+	// region. Empty leaves region resolution to the broker.
+	DefaultRegion string
 }
 
 // MCPServer wraps the underlying MCP server so callers can access it via
@@ -87,7 +90,7 @@ func New(opts Options) *MCPServer {
 	)
 
 	s.AddTool(listProfilesTool(), listProfilesHandler(opts.ListProfiles, opts.Filter, opts.Logger))
-	s.AddTool(createServerTool(), createServerHandler(opts.Broker, opts.Filter, opts.Logger))
+	s.AddTool(createServerTool(), createServerHandler(opts.Broker, opts.Filter, opts.DefaultRegion, opts.Logger))
 	s.AddTool(stopServerTool(), stopServerHandler(opts.Broker, opts.Logger))
 
 	return &MCPServer{s: s}
@@ -150,7 +153,7 @@ type serverURLs struct {
 }
 
 // createServerHandler returns a handler that starts (or returns) an IMDS server.
-func createServerHandler(b BrokerFace, filter ProfileFilter, logger *slog.Logger) mcplib.ToolHandlerFunc {
+func createServerHandler(b BrokerFace, filter ProfileFilter, defaultRegion string, logger *slog.Logger) mcplib.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		logger.Info("mcp tool call", "tool", "create_server", "request_id", requestID())
 		profile, err := req.RequireString("profile")
@@ -160,7 +163,7 @@ func createServerHandler(b BrokerFace, filter ProfileFilter, logger *slog.Logger
 		if !filter.Allowed(profile) {
 			return mcp.NewToolResultError(fmt.Sprintf("profile %q does not match the configured filter", profile)), nil
 		}
-		region := req.GetString("region", "")
+		region := req.GetString("region", defaultRegion)
 
 		result, err := b.CreateServer(ctx, profile, region)
 		if err != nil {

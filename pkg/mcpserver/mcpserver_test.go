@@ -19,13 +19,17 @@ import (
 // ---- test doubles ----
 
 type fakeBroker struct {
-	createResult broker.CreateResult
-	createErr    error
-	stopErr      error
-	stopCalled   string
+	createResult  broker.CreateResult
+	createErr     error
+	stopErr       error
+	stopCalled    string
+	createProfile string
+	createRegion  string
 }
 
-func (f *fakeBroker) CreateServer(_ context.Context, _, _ string) (broker.CreateResult, error) {
+func (f *fakeBroker) CreateServer(_ context.Context, profile, region string) (broker.CreateResult, error) {
+	f.createProfile = profile
+	f.createRegion = region
 	return f.createResult, f.createErr
 }
 
@@ -265,6 +269,48 @@ func TestCreateServer_DefaultFilter_RejectsUnmatchedProfile(t *testing.T) {
 	result := callTool(t, c, "create_server", map[string]any{"profile": "admin-prod"})
 
 	assert.True(t, result.IsError)
+}
+
+// TestCreateServer_UsesDefaultRegionWhenOmitted verifies the configured
+// DefaultRegion is passed to the broker when the tool call omits region.
+func TestCreateServer_UsesDefaultRegionWhenOmitted(t *testing.T) {
+	filter, err := mcpserver.NewProfileFilter(".*")
+	require.NoError(t, err)
+	b := &fakeBroker{createResult: broker.CreateResult{LocalURL: "http://127.0.0.1:12345"}}
+	s := mcpserver.New(mcpserver.Options{
+		Broker:        b,
+		ListProfiles:  func(_ context.Context) ([]profiles.Profile, error) { return nil, nil },
+		Filter:        filter,
+		Logger:        discardLogger(),
+		DefaultRegion: "ap-southeast-2",
+	})
+	c := newTestClient(t, s)
+
+	result := callTool(t, c, "create_server", map[string]any{"profile": "prod"})
+
+	require.False(t, result.IsError)
+	assert.Equal(t, "ap-southeast-2", b.createRegion)
+}
+
+// TestCreateServer_RegionArgOverridesDefault verifies an explicit region arg
+// overrides the configured DefaultRegion.
+func TestCreateServer_RegionArgOverridesDefault(t *testing.T) {
+	filter, err := mcpserver.NewProfileFilter(".*")
+	require.NoError(t, err)
+	b := &fakeBroker{createResult: broker.CreateResult{LocalURL: "http://127.0.0.1:12345"}}
+	s := mcpserver.New(mcpserver.Options{
+		Broker:        b,
+		ListProfiles:  func(_ context.Context) ([]profiles.Profile, error) { return nil, nil },
+		Filter:        filter,
+		Logger:        discardLogger(),
+		DefaultRegion: "ap-southeast-2",
+	})
+	c := newTestClient(t, s)
+
+	result := callTool(t, c, "create_server", map[string]any{"profile": "prod", "region": "us-east-1"})
+
+	require.False(t, result.IsError)
+	assert.Equal(t, "us-east-1", b.createRegion)
 }
 
 // Test 4: stop_server returns success for a known URL.
