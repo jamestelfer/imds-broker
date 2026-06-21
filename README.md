@@ -33,11 +33,12 @@ flowchart LR
     Agent --> AWS
 ```
 
-Three ways to use it:
+Main commands:
 
 - **`serve`** — run a single IMDS server for one AWS profile. Point Docker containers or local tools at it via `AWS_EC2_METADATA_SERVICE_ENDPOINT`. This is the primary day-to-day mode.
 - **`mcp`** — expose an MCP stdio server so AI agents can create and stop IMDS servers on demand for specific profiles.
 - **`profiles`** — list the AWS profiles that would be visible to the MCP server, as JSON. Useful for scripting.
+- **`doctor`** — check the host-side broker configuration and sandbox assumptions.
 
 ## Why
 
@@ -230,40 +231,108 @@ Use `--quiet` to suppress stderr output. The URL is also written to the log file
 
 This lets an agent running in a sandboxed environment — where it has no shell access to AWS credentials and can't assume roles directly — still operate against AWS using whichever profiles the user has pre-approved.
 
-Add to your MCP client config (`claude_desktop_config.json`, `.cursor/mcp.json`, Claude Code, etc.):
+#### Safe Claude Code setup
+
+Use imds-broker with a real sandbox boundary: Anthropic `sandbox-runtime`, a Docker container, or a VM. Run `imds-broker mcp` outside that boundary so it is the agent's only route to host AWS credentials.
+
+Claude Code starts MCP servers from the host context. That is the point: the broker can read host AWS config, while the agent's tools cannot. The profile filter limits which host profiles Claude can request; it does not limit what those AWS profiles can do. Use least-privilege AWS profiles for agent workflows.
+
+```mermaid
+flowchart LR
+    classDef host fill:#FFF4E5,stroke:#F59E0B,color:#4A2E00
+    classDef sandbox fill:#E8F1FF,stroke:#3B82F6,color:#0B2A4A
+    classDef blocked fill:#FEE2E2,stroke:#EF4444,color:#4A0606
+
+    subgraph Host["Host"]
+      AWS["~/.aws + SSO cache"]:::host
+      BrokerCfg["imds-broker config"]:::host
+      Broker["imds-broker mcp"]:::host
+    end
+
+    subgraph Boundary["sandbox-runtime / Docker / VM"]
+      Agent["Claude tools"]:::sandbox
+      Workspace["Project workspace"]:::sandbox
+    end
+
+    AWS --> Broker
+    BrokerCfg --> Broker
+    Agent -->|MCP: list_profiles / create_server| Broker
+    Broker -->|IMDS endpoint URL| Agent
+    Agent -. denied .-> AWS:::blocked
+    Agent -. denied .-> BrokerCfg:::blocked
+```
+
+Recommended Claude Code settings excerpt:
 
 ```json
 {
-  "mcpServers": {
-    "imds-broker": {
-      "command": "imds-broker",
-      "args": ["mcp"]
-    }
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "deny": [
+      "Read(~/.aws/**)",
+      "Read(~/.config/imds-broker/**)",
+      "Edit(~/.aws/**)",
+      "Edit(~/.config/imds-broker/**)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false
   }
 }
 ```
 
-For Claude Code specifically:
+Add any non-standard `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`, or `XDG_CONFIG_HOME` locations to the same `deny` list.
+
+These `Read` and `Edit` denies block Claude's direct file tools. When sandboxing is enabled, Claude Code also merges them into the OS sandbox boundary for Bash, so subprocesses and child processes cannot read or modify those paths indirectly. That indirect block matters: without it, an allowed Bash command could run Python, Node, `aws`, or another program that opens credential files itself.
+
+Do not add `$HOME`, `~/.aws`, `~/.config`, `~/.claude`, or the broker config directory to sandbox filesystem allow-lists.
+
+Configure broker defaults in `${XDG_CONFIG_HOME:-$HOME/.config}/imds-broker/config.yaml`:
+
+```yaml
+profile-filter: ".*ViewOnly.*"
+region: "ap-southeast-2"
+log-level: "info"
+```
+
+Register the broker normally with Claude Code:
 
 ```sh
 claude mcp add imds-broker -- imds-broker mcp
 ```
 
-By default, only profiles matching the regex `ReadOnly|ViewOnly` are exposed to the agent. Override via flag or env var:
+Runtime inputs override file defaults when the broker launch environment is host-controlled:
 
 ```sh
 imds-broker mcp --profile-filter "my-team-.*"
-# or:
 IMDS_BROKER_PROFILE_FILTER="my-team-.*" imds-broker mcp
 ```
 
+If Claude can read AWS credentials, edit broker config, or influence the broker process environment, the filter is advisory.
+
 ### `profiles` — list available profiles
 
-Prints profiles matching the filter as a JSON array. Handy for scripts, or for checking what the MCP server would expose before wiring it up to an agent:
+Prints profiles matching the effective filter as a JSON array. Use it to check what the MCP server would expose to the agent:
 
 ```sh
 imds-broker profiles [--profile-filter REGEX]
 ```
+
+### `doctor` — check host-side setup
+
+Runs local diagnostics for the broker setup:
+
+```sh
+imds-broker doctor
+```
+
+`doctor` reports the config path, whether a config file was found, the effective profile filter, the effective region and log level defaults, the number of discoverable local profiles, and the number matched by the filter.
+
+`doctor` is read-only and does not call AWS APIs. It prints human-readable text for operators. It does not list matched profile names; use `imds-broker profiles` for JSON profile output.
+
+`doctor` checks broker configuration, not container, VM, or sandbox-runtime policy. If the sandbox can read AWS credentials, edit broker config, or influence broker launch inputs, the filter is advisory.
 
 ## How it works
 
@@ -277,7 +346,7 @@ imds-broker profiles [--profile-filter REGEX]
 
 - **AWS credentials must already exist on the host.** The broker reads from local AWS config or an active SSO session; it does not mint credentials from nothing.
 - **Ports are ephemeral.** Each server binds to a random available port. Read it from stderr or the log file and pass it to your container or tool. There is no option to pin a fixed port yet.
-- **Default profile filter is restrictive.** `ReadOnly|ViewOnly` only. If your profiles use different naming, set `--profile-filter` explicitly (e.g. `--profile-filter ".*"`).
+- **Default profile filter is restrictive.** Configure `profile-filter` in `${XDG_CONFIG_HOME:-$HOME/.config}/imds-broker/config.yaml` if your profile names do not match the built-in default. Use runtime filter overrides only from host-controlled launch configuration.
 - **No persistent state.** When the broker process exits, all running servers stop. Clients caching the endpoint will need to reconnect after a restart.
 - **Docker Desktop networking.** `--network host` isn't supported on Docker Desktop; use `host.docker.internal` instead. The Linux Docker bridge is discovered automatically.
 
