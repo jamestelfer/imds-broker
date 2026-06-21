@@ -40,6 +40,7 @@ func main() {
 			serveCommand(),
 			profilesCommand(),
 			mcpCommand(),
+			doctorCommand(),
 			versionCommand(),
 		},
 	}
