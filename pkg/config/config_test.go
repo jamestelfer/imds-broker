@@ -92,6 +92,14 @@ func TestLoad_InvalidRegexFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "profile-filter")
 }
 
+func TestLoad_MultipleDocumentsFails(t *testing.T) {
+	writeConfig(t, "profile-filter: \"first\"\n---\nregion: \"second\"\n")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "multiple YAML documents")
+}
+
 func TestLoad_InvalidLogLevelFails(t *testing.T) {
 	writeConfig(t, "log-level: \"verbose\"\n")
 

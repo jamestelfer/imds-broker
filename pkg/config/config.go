@@ -89,6 +89,16 @@ func Load() (*Config, error) {
 	if err := dec.Decode(&schema); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
+	// Reject multi-document files. A single Decode reads only the first
+	// document, so additional documents would be silently ignored, including
+	// any unknown keys. Fail closed: a multi-document config is an operator
+	// mistake.
+	if err := dec.Decode(new(fileSchema)); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return nil, fmt.Errorf("parse config %q: %w", path, err)
+		}
+		return nil, fmt.Errorf("parse config %q: multiple YAML documents are not supported", path)
+	}
 
 	if schema.ProfileFilter != "" {
 		if _, err := regexp.Compile(schema.ProfileFilter); err != nil {
