@@ -20,6 +20,7 @@ import (
 
 	"github.com/jamestelfer/imds-broker/pkg/awscreds"
 	"github.com/jamestelfer/imds-broker/pkg/broker"
+	brokerconfig "github.com/jamestelfer/imds-broker/pkg/config"
 	"github.com/jamestelfer/imds-broker/pkg/imdsserver"
 	"github.com/jamestelfer/imds-broker/pkg/mcpserver"
 	"github.com/jamestelfer/imds-broker/pkg/profiles"
@@ -32,14 +33,14 @@ func main() {
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "log-level",
-				Value: "info",
-				Usage: "log level: debug, info, warn, error",
+				Usage: "log level: debug, info, warn, error (default: info, or config log-level)",
 			},
 		},
 		Commands: []*cli.Command{
 			serveCommand(),
 			profilesCommand(),
 			mcpCommand(),
+			doctorCommand(),
 			versionCommand(),
 		},
 	}
@@ -104,6 +105,39 @@ func openLogFile(cmdName string) (io.WriteCloser, error) {
 	}, nil
 }
 
+// effectiveFilter resolves the profile filter using runtime override
+// precedence: an explicit --profile-filter flag or IMDS_BROKER_PROFILE_FILTER
+// env value wins, otherwise the configured default applies. An empty result
+// lets the downstream layer apply the built-in default.
+func effectiveFilter(cmd *cli.Command, cfg *brokerconfig.Config) string {
+	if cmd.IsSet("profile-filter") {
+		return cmd.String("profile-filter")
+	}
+	return cfg.ProfileFilter
+}
+
+// effectiveRegion resolves a region default: an explicit --region flag wins,
+// otherwise the configured region applies. An empty result lets the downstream
+// layer apply profile-configured behaviour.
+func effectiveRegion(cmd *cli.Command, cfg *brokerconfig.Config) string {
+	if cmd.IsSet("region") {
+		return cmd.String("region")
+	}
+	return cfg.Region
+}
+
+// effectiveLogLevel resolves the root log level: an explicit --log-level wins,
+// otherwise the configured log-level applies, otherwise the built-in default.
+func effectiveLogLevel(cmd *cli.Command, cfg *brokerconfig.Config) string {
+	if cmd.Root().IsSet("log-level") {
+		return cmd.Root().String("log-level")
+	}
+	if cfg.LogLevel != "" {
+		return cfg.LogLevel
+	}
+	return "info"
+}
+
 func profileFilterFlag() *cli.StringFlag {
 	return &cli.StringFlag{
 		Name:    "profile-filter",
@@ -120,9 +154,12 @@ func profilesCommand() *cli.Command {
 			profileFilterFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			filter := cmd.String("profile-filter")
+			cfg, err := brokerconfig.Load(ctx)
+			if err != nil {
+				return fmt.Errorf("profiles: load config: %w", err)
+			}
 
-			names, err := profiles.List(ctx, filter)
+			names, err := profiles.List(ctx, effectiveFilter(cmd, cfg))
 			if err != nil {
 				return err
 			}
@@ -195,15 +232,18 @@ func mcpCommand() *cli.Command {
 			profileFilterFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			logger, lw, err := newCommandLogger("mcp", cmd.Root().String("log-level"), nil)
+			cfg, err := brokerconfig.Load(ctx)
+			if err != nil {
+				return fmt.Errorf("mcp: load config: %w", err)
+			}
+
+			logger, lw, err := newCommandLogger("mcp", effectiveLogLevel(cmd, cfg), nil)
 			if err != nil {
 				return err
 			}
 			defer func() { _ = lw.Close() }()
 
-			filter := cmd.String("profile-filter")
-
-			pf, err := mcpserver.NewProfileFilter(filter)
+			pf, err := mcpserver.NewProfileFilter(effectiveFilter(cmd, cfg))
 			if err != nil {
 				return fmt.Errorf("mcp: invalid profile filter: %w", err)
 			}
@@ -216,15 +256,12 @@ func mcpCommand() *cli.Command {
 				return fmt.Errorf("mcp: create broker: %w", err)
 			}
 
-			lister := func(ctx context.Context) ([]profiles.Profile, error) {
-				return profiles.List(ctx, ".*") // return all; ProfileFilter is the gate
-			}
-
 			s := mcpserver.New(mcpserver.Options{
-				Broker:       b,
-				ListProfiles: lister,
-				Filter:       pf,
-				Logger:       logger,
+				Broker:        b,
+				ListProfiles:  profiles.ListAll, // ProfileFilter is the gate
+				Filter:        pf,
+				Logger:        logger,
+				DefaultRegion: cfg.Region,
 			})
 
 			if err := s.ServeStdio(); err != nil {
@@ -257,18 +294,23 @@ func serveCommand() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			bcfg, err := brokerconfig.Load(ctx)
+			if err != nil {
+				return fmt.Errorf("serve: load config: %w", err)
+			}
+
 			var stderrWriter io.Writer
 			if !cmd.Bool("quiet") {
 				stderrWriter = os.Stderr
 			}
-			logger, lw, err := newCommandLogger("serve", cmd.Root().String("log-level"), stderrWriter)
+			logger, lw, err := newCommandLogger("serve", effectiveLogLevel(cmd, bcfg), stderrWriter)
 			if err != nil {
 				return err
 			}
 			defer func() { _ = lw.Close() }()
 
 			profile := cmd.String("profile")
-			region := cmd.String("region")
+			region := effectiveRegion(cmd, bcfg)
 
 			// Cancel on SIGINT/SIGTERM.
 			ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)

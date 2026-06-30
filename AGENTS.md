@@ -42,6 +42,39 @@ All packages live under `pkg/` for importability. `cmd/` contains only CLI wirin
 
 ---
 
+## Threat Model
+
+### Default deployment model
+- Treat the sandboxed AI agent as the adversary.
+- Assume `imds-broker mcp` runs outside the sandbox as a host-side process launched by the operator's MCP client.
+- Assume the primary target sandbox is Anthropic's Claude Code sandbox.
+- Assume Claude Code uses a real sandbox boundary: Anthropic `sandbox-runtime`, Docker, or a VM.
+- Assume the sandbox grants the agent access to the project workspace, not to host credential or broker configuration directories.
+- Assume the sandboxed agent cannot read `~/.aws`, AWS SSO caches, exported AWS credential environment variables, or paths named by `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE`.
+- Assume the sandboxed agent cannot read or modify `${XDG_CONFIG_HOME:-$HOME/.config}/imds-broker/config.yaml` unless the design explicitly exposes it.
+- Assume the sandboxed agent cannot influence broker command arguments, broker environment variables, or `PATH` resolution for the host-side broker.
+- Treat `imds-broker` as the only approved path by which the sandboxed agent can obtain AWS credentials.
+
+### Security review rules
+- Analyse whether a change lets the sandboxed agent bypass the broker and read credentials directly.
+- Analyse whether a change lets the sandboxed agent influence host-controlled broker startup inputs or configuration.
+- Analyse whether a change depends on Claude Code permission-bypass modes such as `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, or `--permission-mode bypassPermissions`.
+- Analyse whether a change depends on adding `$HOME`, `~/.aws`, `~/.config`, `~/.claude`, the broker config directory, or other host credential/config paths to Claude Code, Docker, VM, or sandbox-runtime filesystem allow-lists.
+- Analyse whether a change lets the sandboxed agent retain credential access beyond the intended session lifetime.
+- Treat host-local compromise as out of scope unless the design explicitly claims resistance to it.
+- If a finding depends on the attacker controlling host dotfiles, host process launch context, or host environment variables, mark it out of scope by default.
+- If a design relies on a host-controlled file or path, verify that the sandbox boundary keeps that file out of reach of the agent.
+- If a design relies on the sandbox for protection, state that dependency explicitly in the PRD, plan, docs, and code comments where relevant.
+
+### Review guidance for broker configuration
+- Treat broker configuration as host-controlled defaults, not a secret and not a security boundary by itself.
+- Focus on whether the agent can modify configuration, broker launch arguments, environment variables, MCP client configuration, or AWS credential paths.
+- Do not treat mere knowledge of the configured profile filter as a security issue.
+- Treat command-line and environment overrides as host-controlled MCP launch inputs. If the agent controls them, the profile filter is advisory only.
+- Do not over-focus on MCP configuration mechanics. Claude starts MCP servers in the host context; the core defence is the OS/container/VM sandbox around the agent tools.
+
+---
+
 ## Implementation Principles
 
 ### Context propagation
@@ -68,6 +101,12 @@ All packages live under `pkg/` for importability. `cmd/` contains only CLI wirin
 ### Code style
 - Modern Go only — no backwards-compatibility shims.
 - Use generics where they reduce duplication and improve clarity.
+
+### Change discipline
+- Match the size of a change to its value. Refactoring for clarity, consistency, or to remove duplication is worthwhile; churn without a benefit is not. Neither gold-plate nor under-fix.
+- Avoid speculative optimisation. Do not optimise without evidence the path is hot, and state the expected data scale in the justification.
+- If a change would duplicate logic or add cross-package coupling, stop and extract a shared abstraction instead.
+- Treat review comments as input, not a checklist. For each, weigh benefit against cost and data scale, then act or skip with a brief reason. Reject low-value changes explicitly.
 
 ### Verification
 
