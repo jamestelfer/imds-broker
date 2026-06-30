@@ -27,19 +27,26 @@ type Profile struct {
 // filter is empty, DefaultFilter is used. Returns an error if filter is not a
 // valid regex. Results are sorted alphabetically by name.
 //
+// List composes ListAll and Filter: it discovers all profiles, then applies the
+// filter. Callers that need both the full set and a filtered subset (such as
+// the doctor diagnostic) should call ListAll once and Filter the result rather
+// than discovering twice.
+func List(ctx context.Context, filter string) ([]Profile, error) {
+	all, err := ListAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return Filter(all, filter)
+}
+
+// ListAll returns every discoverable AWS profile as structured Profile values,
+// sorted alphabetically by name, without applying any filter.
+//
 // Profile discovery scans the config and credentials files for section
 // headers, then validates each candidate with config.LoadSharedConfigProfile
 // so that all profile-format details (the [profile name] prefix, deduplication,
 // env-var file overrides) are handled by the SDK.
-func List(ctx context.Context, filter string) ([]Profile, error) {
-	if filter == "" {
-		filter = DefaultFilter
-	}
-	re, err := regexp.Compile(filter)
-	if err != nil {
-		return nil, fmt.Errorf("profiles: invalid filter regex %q: %w", filter, err)
-	}
-
+func ListAll(ctx context.Context) ([]Profile, error) {
 	candidates, grantedIDs, configFiles, credFiles, err := candidateProfileNames()
 	if err != nil {
 		return nil, err
@@ -55,17 +62,36 @@ func List(ctx context.Context, filter string) ([]Profile, error) {
 	var result []Profile
 	for _, name := range candidates {
 		if sharedCfg, err := awsconfig.LoadSharedConfigProfile(ctx, name, loadOpts); err == nil {
-			if re.MatchString(name) {
-				result = append(result, Profile{
-					Name:      name,
-					AccountID: resolveAccountID(sharedCfg.RoleARN, grantedIDs[name]),
-					Region:    sharedCfg.Region,
-				})
-			}
+			result = append(result, Profile{
+				Name:      name,
+				AccountID: resolveAccountID(sharedCfg.RoleARN, grantedIDs[name]),
+				Region:    sharedCfg.Region,
+			})
 		}
 		// SharedConfigProfileNotExistError (or any other error) → skip
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result, nil
+}
+
+// Filter returns the profiles whose names match filter, preserving input order.
+// If filter is empty, DefaultFilter is used. Returns an error if filter is not
+// a valid regex. Matching uses Go regexp MatchString semantics.
+func Filter(in []Profile, filter string) ([]Profile, error) {
+	if filter == "" {
+		filter = DefaultFilter
+	}
+	re, err := regexp.Compile(filter)
+	if err != nil {
+		return nil, fmt.Errorf("profiles: invalid filter regex %q: %w", filter, err)
+	}
+
+	var result []Profile
+	for _, p := range in {
+		if re.MatchString(p.Name) {
+			result = append(result, p)
+		}
+	}
 	return result, nil
 }
 

@@ -37,7 +37,7 @@ func doctorCommand() *cli.Command {
 
 			// Discover local profiles once, without AWS API calls. Filtering and
 			// counting happen in-memory inside pkg/doctor.
-			discovered, discoveryErr := profiles.List(ctx, ".*")
+			discovered, discoveryErr := profiles.ListAll(ctx)
 
 			report, err := doctor.Build(doctorInputs(cmd, cfg), discovered, discoveryErr)
 			if err != nil {

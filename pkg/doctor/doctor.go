@@ -6,7 +6,6 @@ package doctor
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/jamestelfer/imds-broker/pkg/profiles"
@@ -84,7 +83,9 @@ func Build(in Inputs, discovered []profiles.Profile, discoveryErr error) (Report
 	r.Region, r.RegionSource = resolveRegion(in)
 	r.LogLevel, r.LogLevelSource = resolveLogLevel(in)
 
-	re, err := regexp.Compile(r.Filter)
+	// Filter validates the effective regex (an invalid filter is a config fault)
+	// and reuses the single discovery pass rather than re-implementing matching.
+	matched, err := profiles.Filter(discovered, r.Filter)
 	if err != nil {
 		return r, fmt.Errorf("invalid effective profile filter %q (%s): %w", r.Filter, r.FilterSource, err)
 	}
@@ -97,11 +98,7 @@ func Build(in Inputs, discovered []profiles.Profile, discoveryErr error) (Report
 	}
 
 	r.TotalProfiles = len(discovered)
-	for _, p := range discovered {
-		if re.MatchString(p.Name) {
-			r.MatchedProfiles++
-		}
-	}
+	r.MatchedProfiles = len(matched)
 
 	return r, nil
 }

@@ -188,3 +188,63 @@ region = us-east-1
 		{Name: "z-ReadOnly", Region: "us-east-1"},
 	}, result)
 }
+
+// ---- Filter (pure) ----
+
+func TestFilter_CustomRegexSelectsSubset(t *testing.T) {
+	in := []profiles.Profile{
+		{Name: "dev-ViewOnly"},
+		{Name: "prod-ReadOnly"},
+		{Name: "admin"},
+	}
+	got, err := profiles.Filter(in, "ViewOnly")
+	require.NoError(t, err)
+	assert.Equal(t, []profiles.Profile{{Name: "dev-ViewOnly"}}, got)
+}
+
+func TestFilter_EmptyFilterUsesDefault(t *testing.T) {
+	in := []profiles.Profile{
+		{Name: "dev-ViewOnly"},
+		{Name: "prod-ReadOnly"},
+		{Name: "admin"},
+	}
+	got, err := profiles.Filter(in, "")
+	require.NoError(t, err)
+	assert.Equal(t, []profiles.Profile{{Name: "dev-ViewOnly"}, {Name: "prod-ReadOnly"}}, got)
+}
+
+func TestFilter_InvalidRegexReturnsError(t *testing.T) {
+	_, err := profiles.Filter([]profiles.Profile{{Name: "x"}}, "[invalid")
+	require.Error(t, err)
+}
+
+func TestFilter_PreservesInputOrder(t *testing.T) {
+	in := []profiles.Profile{
+		{Name: "b-ReadOnly"},
+		{Name: "a-ReadOnly"},
+	}
+	got, err := profiles.Filter(in, "ReadOnly")
+	require.NoError(t, err)
+	assert.Equal(t, in, got)
+}
+
+// ---- ListAll ----
+
+func TestListAll_ReturnsEveryValidatedProfileSorted(t *testing.T) {
+	writeConfig(t, `
+[profile prod-ReadOnly]
+region = us-east-1
+[profile dev-ViewOnly]
+region = us-east-1
+[profile admin]
+region = us-east-1
+`)
+
+	result, err := profiles.ListAll(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []profiles.Profile{
+		{Name: "admin", Region: "us-east-1"},
+		{Name: "dev-ViewOnly", Region: "us-east-1"},
+		{Name: "prod-ReadOnly", Region: "us-east-1"},
+	}, result)
+}

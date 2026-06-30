@@ -154,7 +154,7 @@ func profilesCommand() *cli.Command {
 			profileFilterFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			cfg, err := brokerconfig.Load()
+			cfg, err := brokerconfig.Load(ctx)
 			if err != nil {
 				return fmt.Errorf("profiles: load config: %w", err)
 			}
@@ -232,7 +232,7 @@ func mcpCommand() *cli.Command {
 			profileFilterFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			cfg, err := brokerconfig.Load()
+			cfg, err := brokerconfig.Load(ctx)
 			if err != nil {
 				return fmt.Errorf("mcp: load config: %w", err)
 			}
@@ -256,13 +256,9 @@ func mcpCommand() *cli.Command {
 				return fmt.Errorf("mcp: create broker: %w", err)
 			}
 
-			lister := func(ctx context.Context) ([]profiles.Profile, error) {
-				return profiles.List(ctx, ".*") // return all; ProfileFilter is the gate
-			}
-
 			s := mcpserver.New(mcpserver.Options{
 				Broker:        b,
-				ListProfiles:  lister,
+				ListProfiles:  profiles.ListAll, // ProfileFilter is the gate
 				Filter:        pf,
 				Logger:        logger,
 				DefaultRegion: cfg.Region,
@@ -298,7 +294,7 @@ func serveCommand() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			bcfg, err := brokerconfig.Load()
+			bcfg, err := brokerconfig.Load(ctx)
 			if err != nil {
 				return fmt.Errorf("serve: load config: %w", err)
 			}
