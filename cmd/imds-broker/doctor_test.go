@@ -102,6 +102,20 @@ func TestDoctor_FlagOverridesFilterSource(t *testing.T) {
 	assert.Contains(t, out, "matched by filter:     1")
 }
 
+func TestDoctor_EmptyFlagFilterNormalisesToDefault(t *testing.T) {
+	yaml := "profile-filter: \"ViewOnly\"\n"
+	buf, run := doctorFixture(t, &yaml, awsThreeProfiles)
+
+	// An explicit empty --profile-filter must report and count against the
+	// built-in default, not the empty string.
+	require.NoError(t, run("doctor", "--profile-filter", ""))
+	out := buf.String()
+
+	assert.Contains(t, out, "profile filter: ReadOnly|ViewOnly  (source: command-line flag)")
+	// ReadOnly|ViewOnly matches prod-ReadOnly and dev-ViewOnly.
+	assert.Contains(t, out, "matched by filter:     2")
+}
+
 func TestDoctor_ZeroMatchExitsZero(t *testing.T) {
 	yaml := "profile-filter: \"NoSuchProfile\"\n"
 	buf, run := doctorFixture(t, &yaml, awsThreeProfiles)
