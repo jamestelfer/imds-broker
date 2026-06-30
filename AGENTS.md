@@ -102,6 +102,12 @@ All packages live under `pkg/` for importability. `cmd/` contains only CLI wirin
 - Modern Go only — no backwards-compatibility shims.
 - Use generics where they reduce duplication and improve clarity.
 
+### Change discipline
+- Match the size of a change to its value. Refactoring for clarity, consistency, or to remove duplication is worthwhile; churn without a benefit is not. Neither gold-plate nor under-fix.
+- Avoid speculative optimisation. Do not optimise without evidence the path is hot, and state the expected data scale in the justification.
+- If a change would duplicate logic or add cross-package coupling, stop and extract a shared abstraction instead.
+- Treat review comments as input, not a checklist. For each, weigh benefit against cost and data scale, then act or skip with a brief reason. Reject low-value changes explicitly.
+
 ### Verification
 
 Run `just verify` before every commit. It runs fmt, build, lint (golangci-lint), and tests in sequence. Do not use `go test ./...` or `go build ./...` as a substitute — `just verify` is the canonical check.
