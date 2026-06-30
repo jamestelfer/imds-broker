@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,7 +24,7 @@ func writeConfig(t *testing.T, content string) string {
 
 func TestResolvePath_UsesXDGConfigHome(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg")
-	path, err := ResolvePath()
+	path, err := ResolvePath(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join("/tmp/xdg", RelPath), path)
 }
@@ -31,7 +32,7 @@ func TestResolvePath_UsesXDGConfigHome(t *testing.T) {
 func TestResolvePath_FallsBackToHomeConfig(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "/home/example")
-	path, err := ResolvePath()
+	path, err := ResolvePath(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join("/home/example", ".config", RelPath), path)
 }
@@ -40,7 +41,7 @@ func TestLoad_MissingFileReturnsDefaults(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	cfg, err := Load()
+	cfg, err := Load(context.Background())
 	require.NoError(t, err)
 	assert.False(t, cfg.Found)
 	assert.Empty(t, cfg.ProfileFilter)
@@ -52,7 +53,7 @@ func TestLoad_MissingFileReturnsDefaults(t *testing.T) {
 func TestLoad_ValidConfig(t *testing.T) {
 	writeConfig(t, "profile-filter: \".*ViewOnly.*\"\nregion: \"ap-southeast-2\"\nlog-level: \"debug\"\n")
 
-	cfg, err := Load()
+	cfg, err := Load(context.Background())
 	require.NoError(t, err)
 	assert.True(t, cfg.Found)
 	assert.Equal(t, ".*ViewOnly.*", cfg.ProfileFilter)
@@ -63,7 +64,7 @@ func TestLoad_ValidConfig(t *testing.T) {
 func TestLoad_EmptyFileReturnsDefaults(t *testing.T) {
 	writeConfig(t, "")
 
-	cfg, err := Load()
+	cfg, err := Load(context.Background())
 	require.NoError(t, err)
 	assert.True(t, cfg.Found)
 	assert.Empty(t, cfg.ProfileFilter)
@@ -72,7 +73,7 @@ func TestLoad_EmptyFileReturnsDefaults(t *testing.T) {
 func TestLoad_UnknownKeyFails(t *testing.T) {
 	writeConfig(t, "profile-filter: \"x\"\nunknown-key: \"y\"\n")
 
-	_, err := Load()
+	_, err := Load(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown-key")
 }
@@ -80,14 +81,14 @@ func TestLoad_UnknownKeyFails(t *testing.T) {
 func TestLoad_MalformedFails(t *testing.T) {
 	writeConfig(t, "profile-filter: \"x\nregion: [unterminated\n")
 
-	_, err := Load()
+	_, err := Load(context.Background())
 	require.Error(t, err)
 }
 
 func TestLoad_InvalidRegexFails(t *testing.T) {
 	writeConfig(t, "profile-filter: \"[invalid\"\n")
 
-	_, err := Load()
+	_, err := Load(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "profile-filter")
 }
@@ -95,7 +96,7 @@ func TestLoad_InvalidRegexFails(t *testing.T) {
 func TestLoad_MultipleDocumentsFails(t *testing.T) {
 	writeConfig(t, "profile-filter: \"first\"\n---\nregion: \"second\"\n")
 
-	_, err := Load()
+	_, err := Load(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "multiple YAML documents")
 }
@@ -103,7 +104,7 @@ func TestLoad_MultipleDocumentsFails(t *testing.T) {
 func TestLoad_InvalidLogLevelFails(t *testing.T) {
 	writeConfig(t, "log-level: \"verbose\"\n")
 
-	_, err := Load()
+	_, err := Load(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "log-level")
 }
@@ -116,6 +117,6 @@ func TestLoad_UnreadableFileFails(t *testing.T) {
 	require.NoError(t, os.Chmod(path, 0o000))
 	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
 
-	_, err := Load()
+	_, err := Load(context.Background())
 	require.Error(t, err)
 }

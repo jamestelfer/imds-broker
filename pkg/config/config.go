@@ -9,6 +9,7 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -50,7 +51,10 @@ type fileSchema struct {
 
 // ResolvePath returns the configuration file path. It uses XDG_CONFIG_HOME when
 // set, otherwise $HOME/.config. There is no broker-specific path override.
-func ResolvePath() (string, error) {
+//
+// ctx is accepted for call-chain consistency; path resolution itself does not
+// block on it.
+func ResolvePath(_ context.Context) (string, error) {
 	base := os.Getenv("XDG_CONFIG_HOME")
 	if base == "" {
 		home, err := os.UserHomeDir()
@@ -65,8 +69,8 @@ func ResolvePath() (string, error) {
 // Load reads and validates the configuration once. A missing file yields
 // built-in defaults without error. A present but unreadable, malformed,
 // unknown-key, invalid-regex, or invalid-log-level file fails.
-func Load() (*Config, error) {
-	path, err := ResolvePath()
+func Load(ctx context.Context) (*Config, error) {
+	path, err := ResolvePath(ctx)
 	if err != nil {
 		return nil, err
 	}
