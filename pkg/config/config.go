@@ -193,11 +193,29 @@ func Set(ctx context.Context, key, value string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal config: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create config dir: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return nil, fmt.Errorf("write config %q: %w", path, err)
+
+	// Write to a temp file in the same directory, then rename over the target.
+	// Rename is atomic on the same filesystem, so the existing config is only
+	// replaced on a fully written file. os.CreateTemp creates the file 0o600.
+	tmp, err := os.CreateTemp(dir, ".config-*.yaml.tmp")
+	if err != nil {
+		return nil, fmt.Errorf("create temp config: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }() // no-op once the rename succeeds
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return nil, fmt.Errorf("write temp config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return nil, fmt.Errorf("close temp config: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return nil, fmt.Errorf("replace config %q: %w", path, err)
 	}
 
 	return Load(ctx)

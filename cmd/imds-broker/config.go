@@ -83,8 +83,7 @@ func configSetCommand() *cli.Command {
 		Name:      "set",
 		Usage:     "Set a configuration value (creates the file if absent)",
 		ArgsUsage: "<key> <value>",
-		Description: "Valid keys: " + brokerconfig.KeyProfileFilter + ", " +
-			brokerconfig.KeyRegion + ", " + brokerconfig.KeyLogLevel +
+		Description: "Valid keys: " + strings.Join(brokerconfig.Keys, ", ") +
 			". An empty value clears the key.",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			args := cmd.Args()
