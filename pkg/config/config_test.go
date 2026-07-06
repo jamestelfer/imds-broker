@@ -109,6 +109,82 @@ func TestLoad_InvalidLogLevelFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "log-level")
 }
 
+func TestSet_CreatesFileWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	cfg, err := Set(context.Background(), KeyProfileFilter, ".*ViewOnly.*")
+	require.NoError(t, err)
+	assert.True(t, cfg.Found)
+	assert.Equal(t, ".*ViewOnly.*", cfg.ProfileFilter)
+
+	path := filepath.Join(dir, RelPath)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+func TestSet_PreservesOtherKeys(t *testing.T) {
+	writeConfig(t, "profile-filter: \".*ViewOnly.*\"\nregion: \"ap-southeast-2\"\n")
+
+	cfg, err := Set(context.Background(), KeyLogLevel, "debug")
+	require.NoError(t, err)
+	assert.Equal(t, ".*ViewOnly.*", cfg.ProfileFilter)
+	assert.Equal(t, "ap-southeast-2", cfg.Region)
+	assert.Equal(t, "debug", cfg.LogLevel)
+}
+
+func TestSet_EmptyValueClearsKey(t *testing.T) {
+	writeConfig(t, "profile-filter: \".*ViewOnly.*\"\nregion: \"ap-southeast-2\"\n")
+
+	cfg, err := Set(context.Background(), KeyProfileFilter, "")
+	require.NoError(t, err)
+	assert.Empty(t, cfg.ProfileFilter)
+	assert.Equal(t, "ap-southeast-2", cfg.Region)
+}
+
+func TestSet_UnknownKeyFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	_, err := Set(context.Background(), "bogus", "x")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown configuration key")
+}
+
+func TestSet_InvalidValueFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	_, err := Set(context.Background(), KeyProfileFilter, "[invalid")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "profile-filter")
+
+	_, err = Set(context.Background(), KeyLogLevel, "verbose")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "log-level")
+}
+
+func TestSet_MalformedExistingFileFails(t *testing.T) {
+	writeConfig(t, "profile-filter: \"x\nregion: [unterminated\n")
+
+	_, err := Set(context.Background(), KeyRegion, "ap-southeast-2")
+	require.Error(t, err)
+}
+
+func TestSet_RoundTripsThroughLoad(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	_, err := Set(context.Background(), KeyRegion, "ap-southeast-2")
+	require.NoError(t, err)
+
+	cfg, err := Load(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "ap-southeast-2", cfg.Region)
+	assert.Empty(t, cfg.ProfileFilter)
+}
+
 func TestLoad_UnreadableFileFails(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses file permissions")
