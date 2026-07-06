@@ -24,10 +24,7 @@ func doctorCommand() *cli.Command {
 			profileFilterFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			w := cmd.Root().Writer
-			if w == nil {
-				w = os.Stdout
-			}
+			w := commandWriter(cmd)
 
 			cfg, err := brokerconfig.Load(ctx)
 			if err != nil {

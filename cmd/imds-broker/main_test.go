@@ -164,6 +164,61 @@ func TestEffectiveRegion_ConfigDefaultAndFlagOverride(t *testing.T) {
 		func(c *cli.Command) { assert.Equal(t, "us-east-1", effectiveRegion(c, cfg)) })
 }
 
+// runConfigCmd runs the top-level config command with args, capturing stdout.
+func runConfigCmd(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	var buf bytes.Buffer
+	cmd := &cli.Command{
+		Name:     "imds-broker",
+		Writer:   &buf,
+		Commands: []*cli.Command{configCommand()},
+	}
+	err := cmd.Run(context.Background(), append([]string{"imds-broker"}, args...))
+	return buf.String(), err
+}
+
+func TestConfigPath_PrintsResolvedLocation(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	out, err := runConfigCmd(t, "config", "path")
+	require.NoError(t, err)
+	assert.Contains(t, out, filepath.Join(dir, brokerconfig.RelPath))
+}
+
+func TestConfigList_ReportsUnsetWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	out, err := runConfigCmd(t, "config", "list")
+	require.NoError(t, err)
+	assert.Contains(t, out, "file: not found")
+	assert.Contains(t, out, "profile-filter: (unset")
+}
+
+func TestConfigSet_WritesThenListShows(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	out, err := runConfigCmd(t, "config", "set", "region", "ap-southeast-2")
+	require.NoError(t, err)
+	assert.Contains(t, out, "set region = ap-southeast-2")
+
+	out, err = runConfigCmd(t, "config", "list")
+	require.NoError(t, err)
+	assert.Contains(t, out, "file: found")
+	assert.Contains(t, out, "region: ap-southeast-2")
+}
+
+func TestConfigSet_RejectsWrongArgCount(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	_, err := runConfigCmd(t, "config", "set", "region")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected <key> <value>")
+}
+
 func TestEffectiveLogLevel_Precedence(t *testing.T) {
 	withConfig := &brokerconfig.Config{LogLevel: "debug"}
 	noConfig := &brokerconfig.Config{}
