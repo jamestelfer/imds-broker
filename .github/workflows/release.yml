@@ -1,18 +1,32 @@
+# jamestelfer/imds-broker — build/attest/publish on the v* tag pushed by release-please.
+# Filename kept as release.yml for npm trusted-publishing compatibility.
 name: release
 
 on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
-  id-token: write
-  attestations: write
+# Default-deny at the workflow level; the GITHUB_TOKEN ceiling is granted on the
+# calling job below (secure by default — no other job could ever see it).
+permissions: {}
 
 jobs:
   release:
+    # Caller permissions are a CEILING: a reusable workflow can only downgrade
+    # the GITHUB_TOKEN, never elevate it. Grant at least what
+    # goreleaser-release.yml's job declares; omitting this would starve the
+    # octo-sts OIDC mint and the keyless attestation.
+    permissions:
+      contents: write # fill + publish the release, push assets
+      id-token: write # octo-sts OIDC mint + keyless attestation
+      attestations: write # record build attestations
     uses: chinmina/.github/.github/workflows/goreleaser-release.yml@verified-actions
     with:
+      # Keyless: mint the release-imds-broker token (and release-tap for
+      # homebrew) against the centralised owner policies instead of a PAT.
       token-source: octo-sts
       disable-npm: false
       npm-package-name: "@jamestelfer/imds-broker"
+    # No `secrets:` block: the octo-sts path is keyless (it mints the tap token).
+    # (On the `app` path with homebrew you would add `secrets: inherit` so the
+    # environment-scoped HOMEBREW_GITHUB_TOKEN resolves inside the reusable job.)
