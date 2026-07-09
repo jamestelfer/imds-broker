@@ -34,9 +34,10 @@ changelog:
   sort: asc
 
 release:
-  draft: true
-  use_existing_draft: true
-  prerelease: auto
+  draft: true # leave as draft; the wrapper un-drafts after attestation
+  mode: keep-existing # fill the release-please draft, don't replace it
+  use_existing_draft: true # REQUIRED: lets GetReleaseByTag find the still-draft release
+  prerelease: auto # mark prerelease from a semver pre-release tag
 
 homebrew_casks:
   - name: imds-broker
@@ -51,9 +52,14 @@ homebrew_casks:
       token: "{{ .Env.HOMEBREW_GITHUB_TOKEN }}"
     binaries:
       - imds-broker
+    # skip publishing the cask on a prerelease. release.prerelease: auto only
+    # marks the RELEASE as prerelease — it does NOT gate the cask push.
+    skip_upload: auto
+    # remove the macOS quarantine xattr so the binary runs without a Gatekeeper
+    # prompt after `brew install`.
     hooks:
       post:
         install: |
           if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/imds-broker"]
+            system "xattr", "-dr", "com.apple.quarantine", "#{staged_path}/imds-broker"
           end

@@ -2,6 +2,6 @@
   "name": "@jamestelfer/imds-broker",
   "description": "AWS IMDSv2-compatible credential server for local development and CI",
   "homepage": "https://github.com/jamestelfer/imds-broker",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": ["cli", "aws", "imds", "imdsv2", "credentials"]
 }
