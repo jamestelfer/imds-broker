@@ -25,7 +25,7 @@ jobs:
       # Keyless: mint the release-imds-broker token (and release-tap for
       # homebrew) against the centralised owner policies instead of a PAT.
       token-source: octo-sts
-      disable-npm: false
+      disable-docker-login: true # no container image published; opt out of default-on Docker Hub login
       npm-package-name: "@jamestelfer/imds-broker"
     # No `secrets:` block: the octo-sts path is keyless (it mints the tap token).
     # (On the `app` path with homebrew you would add `secrets: inherit` so the
