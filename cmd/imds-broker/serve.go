@@ -14,6 +14,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/jamestelfer/imds-broker/pkg/awscreds"
 	"github.com/jamestelfer/imds-broker/pkg/broker"
 	brokerconfig "github.com/jamestelfer/imds-broker/pkg/config"
 	"github.com/jamestelfer/imds-broker/pkg/containercreds"
@@ -21,50 +22,39 @@ import (
 	"github.com/jamestelfer/imds-broker/pkg/profiles"
 )
 
-const (
-	protocolIMDS      = "imds"
-	protocolContainer = "container"
-)
+// serverStarter starts the server for the selected protocol and logs where it
+// listens.
+type serverStarter func(bindAddr, profile string, rp awscreds.ResolvedProfile, logger *slog.Logger) (broker.Server, error)
 
-// serveOptions holds the validated serve flags that select and bind a
-// protocol server.
+// serveOptions holds the validated serve flags.
 type serveOptions struct {
-	protocol  string
-	bindAddr  string
-	tokenFile string
-	path      string
+	bindAddr string
+	start    serverStarter
 }
 
-// parseServeOptions validates protocol-related flags. It runs before any AWS
-// configuration is loaded or any listener is bound, so configuration errors
-// fail fast.
+// parseServeOptions validates the protocol and listener flags before any AWS
+// configuration is loaded or any listener is bound.
 func parseServeOptions(cmd *cli.Command) (serveOptions, error) {
-	opts := serveOptions{
-		protocol:  cmd.String("protocol"),
-		tokenFile: cmd.String("token-file"),
-		path:      cmd.String("path"),
-	}
-
 	port := cmd.Int("port")
 	if port < 0 || port > 65535 {
 		return serveOptions{}, fmt.Errorf("--port must be between 0 and 65535, got %d", port)
 	}
-	opts.bindAddr = net.JoinHostPort(cmd.String("bind"), strconv.Itoa(port))
+	opts := serveOptions{bindAddr: net.JoinHostPort(cmd.String("bind"), strconv.Itoa(port))}
 
-	switch opts.protocol {
-	case protocolIMDS:
+	switch protocol := cmd.String("protocol"); protocol {
+	case "imds":
 		if cmd.IsSet("token-file") {
 			return serveOptions{}, errors.New("--token-file requires --protocol container")
 		}
-		if cmd.IsSet("path") {
-			return serveOptions{}, errors.New("--path requires --protocol container")
-		}
-	case protocolContainer:
-		if opts.tokenFile == "" {
+		opts.start = startIMDS
+	case "container":
+		tokenFile := cmd.String("token-file")
+		if tokenFile == "" {
 			return serveOptions{}, errors.New("--protocol container requires --token-file")
 		}
+		opts.start = containerStarter(tokenFile)
 	default:
-		return serveOptions{}, fmt.Errorf("unknown --protocol %q: must be %q or %q", opts.protocol, protocolIMDS, protocolContainer)
+		return serveOptions{}, fmt.Errorf(`unknown --protocol %q: must be "imds" or "container"`, protocol)
 	}
 
 	return opts, nil
@@ -88,17 +78,12 @@ func serveCommand(resolve profileResolver) *cli.Command {
 			&cli.StringFlag{
 				Name:  "protocol",
 				Usage: "credential protocol: imds (EC2 IMDSv2) or container (AWS_CONTAINER_CREDENTIALS_FULL_URI)",
-				Value: protocolIMDS,
+				Value: "imds",
 			},
 			&cli.StringFlag{
 				Name: "token-file",
 				Usage: "container protocol only (required): path the authorisation token is written to, mode 0600. " +
 					"Clients reading it via AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE must run as the broker's UID or root",
-			},
-			&cli.StringFlag{
-				Name:  "path",
-				Usage: "container protocol only: credentials path",
-				Value: containercreds.DefaultPath,
 			},
 			&cli.StringFlag{
 				Name:  "bind",
@@ -137,16 +122,15 @@ func serveCommand(resolve profileResolver) *cli.Command {
 
 			profile := cmd.String("profile")
 
-			// Cancel on SIGINT/SIGTERM.
 			ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			pc, err := resolve(ctx, profile, effectiveRegion(cmd, bcfg))
+			rp, err := resolve(ctx, profile, effectiveRegion(cmd, bcfg))
 			if err != nil {
 				return fmt.Errorf("serve: %w", err)
 			}
 
-			srv, err := startServer(opts, profile, pc, logger)
+			srv, err := opts.start(opts.bindAddr, profile, rp, logger)
 			if err != nil {
 				return fmt.Errorf("serve: start server: %w", err)
 			}
@@ -166,19 +150,32 @@ func serveCommand(resolve profileResolver) *cli.Command {
 	}
 }
 
-// startServer starts the protocol server selected by opts and logs where it
-// listens. The token value is never logged.
-func startServer(opts serveOptions, profile string, pc profileCredentials, logger *slog.Logger) (broker.Server, error) {
-	switch opts.protocol {
-	case protocolContainer:
+func startIMDS(bindAddr, profile string, rp awscreds.ResolvedProfile, logger *slog.Logger) (broker.Server, error) {
+	srv, err := imdsserver.New(imdsserver.Options{
+		Profile:       profile,
+		Region:        rp.Region,
+		PrincipalName: rp.Identity.PrincipalName,
+		AccountID:     rp.Identity.AccountID,
+		BindAddrs:     []string{bindAddr},
+		Logger:        logger,
+		Credentials:   rp.Credentials,
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("IMDS server listening", "url", srv.URLs()[0], "profile", profile)
+	return srv, nil
+}
+
+func containerStarter(tokenFile string) serverStarter {
+	return func(bindAddr, profile string, rp awscreds.ResolvedProfile, logger *slog.Logger) (broker.Server, error) {
 		srv, err := containercreds.New(containercreds.Options{
 			Profile:     profile,
-			Region:      pc.Region,
-			BindAddr:    opts.bindAddr,
-			Path:        opts.path,
-			TokenFile:   opts.tokenFile,
+			Region:      rp.Region,
+			BindAddr:    bindAddr,
+			TokenFile:   tokenFile,
 			Logger:      logger,
-			Credentials: pc.Credentials,
+			Credentials: rp.Credentials,
 		})
 		if err != nil {
 			return nil, err
@@ -186,26 +183,8 @@ func startServer(opts serveOptions, profile string, pc profileCredentials, logge
 		logger.Info("container credentials server listening",
 			"url", srv.CredentialsURL(),
 			"addr", srv.Addr(),
-			"path", srv.Path(),
-			"token_file", opts.tokenFile,
+			"token_file", tokenFile,
 			"profile", profile)
-		return srv, nil
-	default:
-		srv, err := imdsserver.New(imdsserver.Options{
-			Profile:       profile,
-			Region:        pc.Region,
-			PrincipalName: pc.Identity.PrincipalName,
-			AccountID:     pc.Identity.AccountID,
-			BindAddrs:     []string{opts.bindAddr},
-			Logger:        logger,
-			Credentials:   pc.Credentials,
-		})
-		if err != nil {
-			return nil, err
-		}
-		for _, u := range srv.URLs() {
-			logger.Info("IMDS server listening", "url", u, "profile", profile)
-		}
 		return srv, nil
 	}
 }
