@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -320,4 +322,53 @@ func TestServer_StopClosesDoneAndIsIdempotent(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Done() not closed after Stop()")
 	}
+}
+
+func TestServer_TokenFileRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	srv, err := containercreds.New(containercreds.Options{
+		BindAddr:    "127.0.0.1:0",
+		TokenFile:   path,
+		Logger:      discardLogger(),
+		Credentials: staticCreds(time.Now().Add(time.Hour)),
+	})
+	require.NoError(t, err)
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+
+	written, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, srv.Token(), string(written))
+
+	status, _, _ := doRequest(t, http.MethodGet, srv.CredentialsURL(), string(written))
+	assert.Equal(t, http.StatusOK, status)
+
+	srv.Stop()
+	<-srv.Done()
+	assert.NoFileExists(t, path)
+}
+
+func TestServer_TokenFileWriteFailureStopsServer(t *testing.T) {
+	_, err := containercreds.New(containercreds.Options{
+		BindAddr:    "127.0.0.1:0",
+		TokenFile:   filepath.Join(t.TempDir(), "absent", "token"),
+		Logger:      discardLogger(),
+		Credentials: staticCreds(time.Now().Add(time.Hour)),
+	})
+	require.Error(t, err)
+}
+
+func TestServer_AllInterfacesBind(t *testing.T) {
+	srv, err := containercreds.New(containercreds.Options{
+		BindAddr:    "0.0.0.0:0",
+		Logger:      discardLogger(),
+		Credentials: staticCreds(time.Now().Add(time.Hour)),
+	})
+	require.NoError(t, err)
+	defer srv.Stop()
+
+	assert.True(t, strings.HasPrefix(srv.Addr(), "0.0.0.0:"), srv.Addr())
+	assert.True(t, strings.HasPrefix(srv.URLs()[0], "http://127.0.0.1:"), srv.URLs()[0])
 }

@@ -35,6 +35,11 @@ type Options struct {
 	BindAddr string
 	// Path is the credentials path. Defaults to DefaultPath.
 	Path string
+	// TokenFile, when set, receives the authorisation token after the
+	// listener binds, so a present, non-empty file signals readiness. The
+	// file is written atomically with mode 0600 and removed on shutdown if it
+	// still holds this server's token.
+	TokenFile string
 	// Logger is used for request and error logging.
 	Logger *slog.Logger
 	// Credentials provides the AWS credentials served at Path.
@@ -76,7 +81,7 @@ func New(opts Options) (*Server, error) {
 	logger := opts.Logger.With("profile", opts.Profile, "region", opts.Region)
 
 	lc := &net.ListenConfig{}
-	ln, err := lc.Listen(context.Background(), "tcp", opts.BindAddr)
+	ln, err := lc.Listen(context.Background(), listenNetwork(opts.BindAddr), opts.BindAddr)
 	if err != nil {
 		return nil, fmt.Errorf("containercreds: listen on %s: %w", opts.BindAddr, err)
 	}
@@ -115,7 +120,20 @@ func New(opts Options) (*Server, error) {
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			logger.Error("container credentials server shutdown error", "error", err)
 		}
+		if opts.TokenFile != "" {
+			if err := removeTokenFile(opts.TokenFile, token); err != nil {
+				logger.Error("container credentials token file cleanup error", "error", err)
+			}
+		}
 	}()
+
+	if opts.TokenFile != "" {
+		if err := writeTokenFile(opts.TokenFile, token); err != nil {
+			cancel()
+			<-done
+			return nil, err
+		}
+	}
 
 	var stopOnce sync.Once
 	return &Server{
@@ -137,6 +155,20 @@ func validatePath(p string) error {
 		return fmt.Errorf("containercreds: invalid credentials path %q", p)
 	}
 	return nil
+}
+
+// listenNetwork returns "tcp4" for an IPv4 literal host, so "0.0.0.0" binds
+// IPv4 only and reports itself as such, rather than as a dual-stack "[::]"
+// listener. Other hosts use "tcp".
+func listenNetwork(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "tcp"
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.To4() != nil {
+		return "tcp4"
+	}
+	return "tcp"
 }
 
 // localAddr maps an all-interfaces listen address to loopback so the
