@@ -25,9 +25,11 @@ type fakeBroker struct {
 	stopCalled    string
 	createProfile string
 	createRegion  string
+	createCalled  bool
 }
 
 func (f *fakeBroker) CreateServer(_ context.Context, profile, region string) (broker.CreateResult, error) {
+	f.createCalled = true
 	f.createProfile = profile
 	f.createRegion = region
 	return f.createResult, f.createErr
@@ -348,4 +350,63 @@ func TestStopServer_UnknownURL_ReturnsErrorResult(t *testing.T) {
 	result := callTool(t, c, "stop_server", map[string]any{"url": "http://127.0.0.1:99999"})
 
 	assert.True(t, result.IsError)
+}
+
+// TestCreateServer_BlankProfile_ReturnsErrorWithoutCallingBroker checks that a
+// blank profile is rejected even when a permissive filter would allow it. The
+// AWS SDK treats an empty profile as unset and falls back to host credentials.
+func TestCreateServer_BlankProfile_ReturnsErrorWithoutCallingBroker(t *testing.T) {
+	for name, profile := range map[string]string{"empty": "", "whitespace": " \t"} {
+		t.Run(name, func(t *testing.T) {
+			filter, err := mcpserver.NewProfileFilter(".*")
+			require.NoError(t, err)
+			b := &fakeBroker{}
+			s := mcpserver.New(mcpserver.Options{
+				Broker:       b,
+				ListProfiles: func(_ context.Context) ([]profiles.Profile, error) { return nil, nil },
+				Filter:       filter,
+				Logger:       discardLogger(),
+			})
+			c := newTestClient(t, s)
+
+			result := callTool(t, c, "create_server", map[string]any{"profile": profile})
+
+			assert.True(t, result.IsError)
+			assert.Contains(t, firstText(t, result), "profile name is required")
+			assert.False(t, b.createCalled, "broker must not be called for a blank profile")
+		})
+	}
+}
+
+// TestCreateServer_SchemaRequiresNonBlankProfile checks that the advertised
+// input schema tells clients the profile must contain a non-whitespace
+// character. mcp-go does not enforce the schema, so the handler also checks.
+func TestCreateServer_SchemaRequiresNonBlankProfile(t *testing.T) {
+	s := mcpserver.New(mcpserver.Options{
+		Broker:       &fakeBroker{},
+		ListProfiles: func(_ context.Context) ([]profiles.Profile, error) { return nil, nil },
+		Logger:       discardLogger(),
+	})
+	c := newTestClient(t, s)
+
+	tools, err := c.ListTools(context.Background(), mcp.ListToolsRequest{})
+	require.NoError(t, err)
+
+	createServer := findTool(t, tools.Tools, "create_server")
+	schema, ok := createServer.InputSchema.Properties["profile"].(map[string]any)
+	require.True(t, ok, "create_server profile property not found")
+	assert.Contains(t, createServer.InputSchema.Required, "profile")
+	assert.EqualValues(t, 1, schema["minLength"])
+	assert.Equal(t, `\S`, schema["pattern"])
+}
+
+func findTool(t *testing.T, tools []mcp.Tool, name string) mcp.Tool {
+	t.Helper()
+	for _, tl := range tools {
+		if tl.Name == name {
+			return tl
+		}
+	}
+	t.Fatalf("tool %q not found", name)
+	return mcp.Tool{}
 }

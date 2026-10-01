@@ -3,6 +3,7 @@ package profiles
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -15,6 +16,21 @@ import (
 
 // DefaultFilter is the regex applied when no filter is specified.
 const DefaultFilter = `ReadOnly|ViewOnly`
+
+// NamePattern is the JSON Schema pattern a profile name must match: at least
+// one non-whitespace character. It mirrors ValidateName for advertised schemas.
+const NamePattern = `\S`
+
+// ValidateName rejects an empty or whitespace-only profile name. The AWS SDK
+// treats an empty profile as unset and falls back to its default credential
+// chain (environment credentials, AWS_PROFILE, the default profile), which
+// would serve host credentials that no named profile selected.
+func ValidateName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("profile name is required")
+	}
+	return nil
+}
 
 // Profile is a discovered AWS profile with its key metadata.
 type Profile struct {
