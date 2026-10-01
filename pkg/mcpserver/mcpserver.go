@@ -138,6 +138,8 @@ func createServerTool() mcp.Tool {
 		mcp.WithDescription("Start (or return the existing) IMDS server for an AWS profile"),
 		mcp.WithString("profile",
 			mcp.Required(),
+			mcp.MinLength(1),
+			mcp.Pattern(profiles.NamePattern),
 			mcp.Description("AWS profile name"),
 		),
 		mcp.WithString("region",
@@ -158,6 +160,10 @@ func createServerHandler(b BrokerFace, filter ProfileFilter, defaultRegion strin
 		logger.Info("mcp tool call", "tool", "create_server", "request_id", requestID())
 		profile, err := req.RequireString("profile")
 		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		// mcp-go does not enforce the input schema, so check here too.
+		if err := profiles.ValidateName(profile); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if !filter.Allowed(profile) {

@@ -248,3 +248,12 @@ region = us-east-1
 		{Name: "prod-ReadOnly", Region: "us-east-1"},
 	}, result)
 }
+
+func TestValidateName(t *testing.T) {
+	for _, name := range []string{"", " ", "\t\n"} {
+		err := profiles.ValidateName(name)
+		require.Error(t, err, "name %q", name)
+		assert.Contains(t, err.Error(), "profile name is required")
+	}
+	assert.NoError(t, profiles.ValidateName("dev-ReadOnly"))
+}

@@ -281,9 +281,10 @@ func serveCommand() *cli.Command {
 		Usage: "Start an IMDS server for a single AWS profile",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:     "profile",
-				Usage:    "AWS profile name",
-				Required: true,
+				Name:      "profile",
+				Usage:     "AWS profile name",
+				Required:  true,
+				Validator: profiles.ValidateName,
 			},
 			&cli.StringFlag{
 				Name:  "region",
