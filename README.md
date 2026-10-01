@@ -35,7 +35,7 @@ flowchart LR
 
 Main commands:
 
-- **`serve`** — run a single IMDS server for one AWS profile. Point Docker containers or local tools at it via `AWS_EC2_METADATA_SERVICE_ENDPOINT`. This is the primary day-to-day mode.
+- **`serve`** — run a single credentials server for one AWS profile. Point Docker containers or local tools at it via `AWS_EC2_METADATA_SERVICE_ENDPOINT` (IMDS, the default) or `AWS_CONTAINER_CREDENTIALS_FULL_URI` (`--protocol container`). This is the primary day-to-day mode.
 - **`mcp`** — expose an MCP stdio server so AI agents can create and stop IMDS servers on demand for specific profiles.
 - **`profiles`** — list the AWS profiles that would be visible to the MCP server, as JSON. Useful for scripting.
 - **`doctor`** — check the host-side broker configuration and sandbox assumptions.
@@ -225,6 +225,43 @@ No credentials enter the container — only the endpoint URL.
 
 Use `--quiet` to suppress stderr output. The URL is also written to the log file at `~/.local/state/sandy/logs/imds-broker/`.
 
+Use `--port` to pin the listening port and `--bind` to restrict the listening address (default `0.0.0.0`).
+
+#### Container credentials protocol
+
+`--protocol container` serves the AWS container credentials protocol instead of IMDS. Every AWS SDK and the AWS CLI consume it through `AWS_CONTAINER_CREDENTIALS_FULL_URI`. There is no session-token handshake: a client sends one `GET` with a bearer token.
+
+```sh
+imds-broker serve --profile my-profile \
+  --protocol container \
+  --token-file /run/broker/token \
+  --port 8080
+```
+
+On startup the server generates a random token and writes it to `--token-file` (required). The file is written atomically with mode `0600`, only after the listener is bound. A present, non-empty token file therefore means the server is ready. The file is removed on shutdown.
+
+Point a client at it:
+
+```sh
+export AWS_CONTAINER_CREDENTIALS_FULL_URI=http://127.0.0.1:8080/2016-11-01/credentials
+export AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE=/run/broker/token
+aws sts get-caller-identity
+```
+
+Over plain HTTP, SDKs only send the request to loopback, `169.254.170.2`, `169.254.170.23`, or `fd00:ec2::23`. Reach the broker at one of those addresses.
+
+Deployment guidance for docker-compose:
+
+- Put the broker and client on a shared bridge network with a `169.254.170.0/24` subnet. Pin the broker to `169.254.170.23` with compose IPAM.
+- Share the token file through a volume, ideally tmpfs-backed. Mount it read-only in the client.
+- Run the client as the broker's UID, or as root. The token file is owner-only (`0600`).
+- Set `AWS_CONTAINER_CREDENTIALS_FULL_URI=http://169.254.170.23:<port>/2016-11-01/credentials` and `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE=<shared-token-path>` in the client.
+- Gate client startup on a broker healthcheck that asserts the token file is present and non-empty.
+
+The token is defence-in-depth against stray containers on the shared network. It does not protect credentials from the client, which is the intended recipient. The container protocol does not apply the IMDS connection filter; the token gates every request, including requests for unknown paths. Keeping the token file away from other workloads depends on the sandbox boundary.
+
+The MCP server remains IMDS-only. The container protocol is available only through `serve`.
+
 ### `mcp` — for AI agents
 
 `imds-broker mcp` runs an [MCP](https://modelcontextprotocol.io/) stdio server that exposes three tools: `list_profiles`, `create_server`, and `stop_server`. An agent calls `create_server` with a profile name, receives an endpoint URL, does its work with `AWS_EC2_METADATA_SERVICE_ENDPOINT` set to that URL, and calls `stop_server` when finished.
@@ -345,7 +382,7 @@ imds-broker doctor
 ## Caveats
 
 - **AWS credentials must already exist on the host.** The broker reads from local AWS config or an active SSO session; it does not mint credentials from nothing.
-- **Ports are ephemeral.** Each server binds to a random available port. Read it from stderr or the log file and pass it to your container or tool. There is no option to pin a fixed port yet.
+- **Ports are ephemeral by default.** Each server binds to a random available port unless `serve --port` pins one. MCP-created servers always use ephemeral ports. Read the port from stderr or the log file and pass it to your container or tool.
 - **Default profile filter is restrictive.** Configure `profile-filter` in `${XDG_CONFIG_HOME:-$HOME/.config}/imds-broker/config.yaml` if your profile names do not match the built-in default. Use runtime filter overrides only from host-controlled launch configuration.
 - **No persistent state.** When the broker process exits, all running servers stop. Clients caching the endpoint will need to reconnect after a restart.
 - **Docker Desktop networking.** `--network host` isn't supported on Docker Desktop; use `host.docker.internal` instead. The Linux Docker bridge is discovered automatically.

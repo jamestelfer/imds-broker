@@ -8,9 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -29,7 +27,7 @@ import (
 func main() {
 	app := &cli.Command{
 		Name:  "imds-broker",
-		Usage: "Serve AWS credentials via the EC2 IMDSv2 protocol",
+		Usage: "Serve AWS credentials via the EC2 IMDSv2 or container credentials protocol",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "log-level",
@@ -37,7 +35,7 @@ func main() {
 			},
 		},
 		Commands: []*cli.Command{
-			serveCommand(),
+			serveCommand(resolveProfile),
 			profilesCommand(),
 			mcpCommand(),
 			configCommand(),
@@ -186,10 +184,22 @@ func credentialProvider(ctx context.Context, cfg aws.Config, stsClient *sts.Clie
 	return aws.NewCredentialsCache(awscreds.NewSessionTokenProvider(stsClient)), nil
 }
 
-// imdsFactory is the broker.ServerFactory used in production. It loads AWS
-// credentials for the given profile, validates them via STS, and starts an
-// IMDS server.
-func imdsFactory(ctx context.Context, profile, region string, bindAddrs []string, logger *slog.Logger) (broker.Server, error) {
+// profileCredentials is the AWS state resolved for a single profile.
+type profileCredentials struct {
+	// Region is the effective region after applying profile configuration.
+	Region      string
+	Identity    awscreds.CallerIdentity
+	Credentials aws.CredentialsProvider
+}
+
+// profileResolver resolves credentials for a profile. Production code uses
+// resolveProfile; tests inject fakes.
+type profileResolver func(ctx context.Context, profile, region string) (profileCredentials, error)
+
+// resolveProfile loads AWS config for profile, validates the credentials via
+// STS GetCallerIdentity, and builds the credential provider shared by every
+// serving protocol. An empty region defers to the profile configuration.
+func resolveProfile(ctx context.Context, profile, region string) (profileCredentials, error) {
 	loadOpts := []func(*config.LoadOptions) error{
 		config.WithSharedConfigProfile(profile),
 	}
@@ -199,29 +209,40 @@ func imdsFactory(ctx context.Context, profile, region string, bindAddrs []string
 
 	cfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("mcp: load AWS config for profile %q: %w", profile, err)
+		return profileCredentials{}, fmt.Errorf("load AWS config for profile %q: %w", profile, err)
 	}
 
 	stsClient := sts.NewFromConfig(cfg)
 
 	identity, err := awscreds.ResolveCallerIdentity(ctx, stsClient)
 	if err != nil {
-		return nil, fmt.Errorf("mcp: resolve caller identity for profile %q: %w", profile, err)
+		return profileCredentials{}, fmt.Errorf("resolve caller identity for profile %q: %w", profile, err)
 	}
 
 	creds, err := credentialProvider(ctx, cfg, stsClient)
 	if err != nil {
-		return nil, fmt.Errorf("mcp: build credential provider for profile %q: %w", profile, err)
+		return profileCredentials{}, fmt.Errorf("build credential provider for profile %q: %w", profile, err)
+	}
+
+	return profileCredentials{Region: cfg.Region, Identity: identity, Credentials: creds}, nil
+}
+
+// imdsFactory is the broker.ServerFactory used in production. It resolves
+// AWS credentials for the given profile and starts an IMDS server.
+func imdsFactory(ctx context.Context, profile, region string, bindAddrs []string, logger *slog.Logger) (broker.Server, error) {
+	pc, err := resolveProfile(ctx, profile, region)
+	if err != nil {
+		return nil, fmt.Errorf("mcp: %w", err)
 	}
 
 	return imdsserver.New(imdsserver.Options{
 		Profile:       profile,
-		Region:        cfg.Region,
-		PrincipalName: identity.PrincipalName,
-		AccountID:     identity.AccountID,
+		Region:        pc.Region,
+		PrincipalName: pc.Identity.PrincipalName,
+		AccountID:     pc.Identity.AccountID,
 		BindAddrs:     bindAddrs,
 		Logger:        logger,
-		Credentials:   creds,
+		Credentials:   pc.Credentials,
 	})
 }
 
@@ -270,104 +291,6 @@ func mcpCommand() *cli.Command {
 			}
 
 			b.StopAll()
-			return nil
-		},
-	}
-}
-
-func serveCommand() *cli.Command {
-	return &cli.Command{
-		Name:  "serve",
-		Usage: "Start an IMDS server for a single AWS profile",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:      "profile",
-				Usage:     "AWS profile name",
-				Required:  true,
-				Validator: profiles.ValidateName,
-			},
-			&cli.StringFlag{
-				Name:  "region",
-				Usage: "AWS region (defaults to the profile-configured region)",
-			},
-			&cli.BoolFlag{
-				Name:  "quiet",
-				Usage: "suppress log output to stderr",
-			},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			bcfg, err := brokerconfig.Load(ctx)
-			if err != nil {
-				return fmt.Errorf("serve: load config: %w", err)
-			}
-
-			var stderrWriter io.Writer
-			if !cmd.Bool("quiet") {
-				stderrWriter = os.Stderr
-			}
-			logger, lw, err := newCommandLogger("serve", effectiveLogLevel(cmd, bcfg), stderrWriter)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = lw.Close() }()
-
-			profile := cmd.String("profile")
-			region := effectiveRegion(cmd, bcfg)
-
-			// Cancel on SIGINT/SIGTERM.
-			ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-			defer stop()
-
-			// Load AWS config for the specified profile.
-			loadOpts := []func(*config.LoadOptions) error{
-				config.WithSharedConfigProfile(profile),
-			}
-			if region != "" {
-				loadOpts = append(loadOpts, config.WithRegion(region))
-			}
-
-			cfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
-			if err != nil {
-				return fmt.Errorf("serve: load AWS config for profile %q: %w", profile, err)
-			}
-
-			stsClient := sts.NewFromConfig(cfg)
-
-			// Resolve the principal name and validate credentials at startup.
-			identity, err := awscreds.ResolveCallerIdentity(ctx, stsClient)
-			if err != nil {
-				return fmt.Errorf("serve: resolve caller identity: %w", err)
-			}
-
-			creds, err := credentialProvider(ctx, cfg, stsClient)
-			if err != nil {
-				return fmt.Errorf("serve: build credential provider: %w", err)
-			}
-
-			srv, err := imdsserver.New(imdsserver.Options{
-				Profile:       profile,
-				Region:        cfg.Region,
-				PrincipalName: identity.PrincipalName,
-				AccountID:     identity.AccountID,
-				BindAddrs:     []string{"0.0.0.0:0"},
-				Logger:        logger,
-				Credentials:   creds,
-			})
-			if err != nil {
-				return fmt.Errorf("serve: start server: %w", err)
-			}
-			defer srv.Stop()
-
-			for _, u := range srv.URLs() {
-				logger.Info("IMDS server listening", "url", u, "profile", profile)
-			}
-
-			select {
-			case <-ctx.Done():
-				logger.Info("shutting down")
-			case <-srv.Done():
-				logger.Error("IMDS server exited unexpectedly")
-			}
 			return nil
 		},
 	}
