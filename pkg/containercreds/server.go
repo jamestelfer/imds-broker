@@ -40,6 +40,9 @@ type Options struct {
 	// file is written atomically with mode 0600 and removed on shutdown if it
 	// still holds this server's token.
 	TokenFile string
+	// WrapListener, when set, wraps the bound listener before serving. It is
+	// a seam for tests that need to fail or panic inside the serve loop.
+	WrapListener func(net.Listener) net.Listener
 	// Logger is used for request and error logging.
 	Logger *slog.Logger
 	// Credentials provides the AWS credentials served at Path.
@@ -59,17 +62,8 @@ type Server struct {
 // New binds a listener, generates an authorisation token, and starts serving
 // the credentials returned by opts.Credentials.
 func New(opts Options) (*Server, error) {
-	if opts.BindAddr == "" {
-		return nil, errors.New("containercreds: bind address is required")
-	}
-	if opts.Credentials == nil {
-		return nil, errors.New("containercreds: credential provider is required")
-	}
-	credsPath := opts.Path
-	if credsPath == "" {
-		credsPath = DefaultPath
-	}
-	if err := validatePath(credsPath); err != nil {
+	credsPath, err := opts.validate()
+	if err != nil {
 		return nil, err
 	}
 
@@ -84,6 +78,10 @@ func New(opts Options) (*Server, error) {
 	ln, err := lc.Listen(context.Background(), listenNetwork(opts.BindAddr), opts.BindAddr)
 	if err != nil {
 		return nil, fmt.Errorf("containercreds: listen on %s: %w", opts.BindAddr, err)
+	}
+
+	if opts.WrapListener != nil {
+		ln = opts.WrapListener(ln)
 	}
 
 	addr := ln.Addr().String()
@@ -144,6 +142,25 @@ func New(opts Options) (*Server, error) {
 		stop:  func() { stopOnce.Do(cancel) },
 		done:  done,
 	}, nil
+}
+
+// validate checks required options and returns the effective credentials
+// path.
+func (opts Options) validate() (string, error) {
+	if opts.BindAddr == "" {
+		return "", errors.New("containercreds: bind address is required")
+	}
+	if opts.Credentials == nil {
+		return "", errors.New("containercreds: credential provider is required")
+	}
+	credsPath := opts.Path
+	if credsPath == "" {
+		credsPath = DefaultPath
+	}
+	if err := validatePath(credsPath); err != nil {
+		return "", err
+	}
+	return credsPath, nil
 }
 
 // validatePath rejects paths that would not register as a single exact
