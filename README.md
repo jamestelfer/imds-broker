@@ -340,6 +340,8 @@ Register the broker normally with Claude Code:
 claude mcp add imds-broker -- imds-broker mcp
 ```
 
+The profile filter is a Go regular expression matched anywhere in the profile name. The built-in default, `ReadOnly|ViewOnly`, therefore admits any name containing either word. Anchor a filter with `^...$` to require an exact match.
+
 Runtime inputs override file defaults when the broker launch environment is host-controlled:
 
 ```sh
