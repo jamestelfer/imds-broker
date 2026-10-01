@@ -247,7 +247,7 @@ func TestServe_RejectsBlankProfile(t *testing.T) {
 			app := &cli.Command{
 				Name:     "imds-broker",
 				Flags:    []cli.Flag{&cli.StringFlag{Name: "log-level"}},
-				Commands: []*cli.Command{serveCommand()},
+				Commands: []*cli.Command{serveCommand(resolveProfile)},
 			}
 			err := app.Run(t.Context(), []string{"imds-broker", "serve", "--quiet", "--profile", profile})
 			require.Error(t, err)
