@@ -3,7 +3,6 @@ package awscreds
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -37,16 +36,15 @@ func (p *SessionTokenProvider) Retrieve(ctx context.Context) (aws.Credentials, e
 	}
 
 	c := out.Credentials
-	expiry := time.Time{}
-	if c.Expiration != nil {
-		expiry = *c.Expiration
-	}
 
+	// CanExpire must be set for aws.CredentialsCache to treat the credentials
+	// as expired and re-fetch them; Expires alone is ignored.
 	return aws.Credentials{
 		AccessKeyID:     aws.ToString(c.AccessKeyId),
 		SecretAccessKey: aws.ToString(c.SecretAccessKey),
 		SessionToken:    aws.ToString(c.SessionToken),
-		Expires:         expiry,
+		CanExpire:       c.Expiration != nil,
+		Expires:         aws.ToTime(c.Expiration),
 		Source:          "STS",
 	}, nil
 }
