@@ -376,7 +376,7 @@ imds-broker doctor
 - Reads credentials from your local AWS config files or an active SSO session on demand.
 - Validates them via STS on first use.
 - Wraps static IAM credentials with STS `GetSessionToken` so clients always receive short-lived, rotatable tokens.
-- Listens on an ephemeral port on all interfaces, but the listener is fail-closed: connections from anywhere outside loopback, the Docker bridge network, and your LAN are rejected before any HTTP parsing.
+- Listens on IPv4, on all interfaces by default. The IMDS listener is fail-closed: connections from anywhere outside loopback, the Docker bridge network, and your LAN are rejected before any HTTP parsing. The container credentials listener has no address filter; its bearer token gates every request.
 - Fully implements the IMDSv2 token + metadata flow, so any AWS SDK that supports EC2 instance credential resolution works, including older SDKs that pre-date newer credential providers.
 
 ## Caveats

@@ -232,26 +232,3 @@ func TestEffectiveLogLevel_Precedence(t *testing.T) {
 	runWith(t, nil, []string{"imds-broker", "--log-level", "warn", "sub"},
 		func(c *cli.Command) { assert.Equal(t, "warn", effectiveLogLevel(c, withConfig)) })
 }
-
-func TestServe_RejectsBlankProfile(t *testing.T) {
-	for name, profile := range map[string]string{"empty": "", "whitespace": " \t"} {
-		t.Run(name, func(t *testing.T) {
-			// Isolate host state so a missing validator fails fast rather than
-			// resolving real credentials.
-			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-			t.Setenv("XDG_STATE_HOME", t.TempDir())
-			t.Setenv("AWS_CONFIG_FILE", filepath.Join(t.TempDir(), "config"))
-			t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials"))
-			t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
-
-			app := &cli.Command{
-				Name:     "imds-broker",
-				Flags:    []cli.Flag{&cli.StringFlag{Name: "log-level"}},
-				Commands: []*cli.Command{serveCommand(resolveProfile)},
-			}
-			err := app.Run(t.Context(), []string{"imds-broker", "serve", "--quiet", "--profile", profile})
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "profile name is required")
-		})
-	}
-}

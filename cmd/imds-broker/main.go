@@ -10,9 +10,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/urfave/cli/v3"
 	"gopkg.in/natefinch/lumberjack.v2"
 
@@ -35,7 +32,7 @@ func main() {
 			},
 		},
 		Commands: []*cli.Command{
-			serveCommand(resolveProfile),
+			serveCommand(awscreds.ResolveProfile),
 			profilesCommand(),
 			mcpCommand(),
 			configCommand(),
@@ -170,67 +167,14 @@ func profilesCommand() *cli.Command {
 	}
 }
 
-// credentialProvider returns a provider that vends the credentials for cfg.
-// If the credentials are already temporary (session token present), they are
-// used as-is. Long-term credentials are upgraded via STS GetSessionToken.
-func credentialProvider(ctx context.Context, cfg aws.Config, stsClient *sts.Client) (aws.CredentialsProvider, error) {
-	creds, err := cfg.Credentials.Retrieve(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("retrieve credentials: %w", err)
-	}
-	if creds.SessionToken != "" {
-		return cfg.Credentials, nil
-	}
-	return aws.NewCredentialsCache(awscreds.NewSessionTokenProvider(stsClient)), nil
-}
-
-// profileCredentials is the AWS state resolved for a single profile.
-type profileCredentials struct {
-	// Region is the effective region after applying profile configuration.
-	Region      string
-	Identity    awscreds.CallerIdentity
-	Credentials aws.CredentialsProvider
-}
-
-// profileResolver resolves credentials for a profile. Production code uses
-// resolveProfile; tests inject fakes.
-type profileResolver func(ctx context.Context, profile, region string) (profileCredentials, error)
-
-// resolveProfile loads AWS config for profile, validates the credentials via
-// STS GetCallerIdentity, and builds the credential provider shared by every
-// serving protocol. An empty region defers to the profile configuration.
-func resolveProfile(ctx context.Context, profile, region string) (profileCredentials, error) {
-	loadOpts := []func(*config.LoadOptions) error{
-		config.WithSharedConfigProfile(profile),
-	}
-	if region != "" {
-		loadOpts = append(loadOpts, config.WithRegion(region))
-	}
-
-	cfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
-	if err != nil {
-		return profileCredentials{}, fmt.Errorf("load AWS config for profile %q: %w", profile, err)
-	}
-
-	stsClient := sts.NewFromConfig(cfg)
-
-	identity, err := awscreds.ResolveCallerIdentity(ctx, stsClient)
-	if err != nil {
-		return profileCredentials{}, fmt.Errorf("resolve caller identity for profile %q: %w", profile, err)
-	}
-
-	creds, err := credentialProvider(ctx, cfg, stsClient)
-	if err != nil {
-		return profileCredentials{}, fmt.Errorf("build credential provider for profile %q: %w", profile, err)
-	}
-
-	return profileCredentials{Region: cfg.Region, Identity: identity, Credentials: creds}, nil
-}
+// profileResolver resolves a profile's credentials. Production code uses
+// awscreds.ResolveProfile; tests inject fakes.
+type profileResolver func(ctx context.Context, profile, region string) (awscreds.ResolvedProfile, error)
 
 // imdsFactory is the broker.ServerFactory used in production. It resolves
 // AWS credentials for the given profile and starts an IMDS server.
 func imdsFactory(ctx context.Context, profile, region string, bindAddrs []string, logger *slog.Logger) (broker.Server, error) {
-	pc, err := resolveProfile(ctx, profile, region)
+	pc, err := awscreds.ResolveProfile(ctx, profile, region)
 	if err != nil {
 		return nil, fmt.Errorf("mcp: %w", err)
 	}

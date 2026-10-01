@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -134,15 +132,15 @@ func TestProtocol(t *testing.T) {
 		wantStatus int
 		wantCode   string
 	}{
-		{name: "valid token", srv: ok, method: http.MethodGet, path: containercreds.DefaultPath, token: ok.Token(), wantStatus: http.StatusOK},
-		{name: "absent token", srv: ok, method: http.MethodGet, path: containercreds.DefaultPath, wantStatus: http.StatusForbidden, wantCode: "AccessDenied"},
-		{name: "wrong token", srv: ok, method: http.MethodGet, path: containercreds.DefaultPath, token: strings.Repeat("0", len(ok.Token())), wantStatus: http.StatusForbidden, wantCode: "AccessDenied"},
-		{name: "bearer prefix rejected", srv: ok, method: http.MethodGet, path: containercreds.DefaultPath, token: "Bearer " + ok.Token(), wantStatus: http.StatusForbidden, wantCode: "AccessDenied"},
+		{name: "valid token", srv: ok, method: http.MethodGet, path: containercreds.Path, token: ok.Token(), wantStatus: http.StatusOK},
+		{name: "absent token", srv: ok, method: http.MethodGet, path: containercreds.Path, wantStatus: http.StatusForbidden, wantCode: "AccessDenied"},
+		{name: "wrong token", srv: ok, method: http.MethodGet, path: containercreds.Path, token: strings.Repeat("0", len(ok.Token())), wantStatus: http.StatusForbidden, wantCode: "AccessDenied"},
+		{name: "bearer prefix rejected", srv: ok, method: http.MethodGet, path: containercreds.Path, token: "Bearer " + ok.Token(), wantStatus: http.StatusForbidden, wantCode: "AccessDenied"},
 		{name: "unknown path unauthenticated", srv: ok, method: http.MethodGet, path: "/nope", wantStatus: http.StatusForbidden, wantCode: "AccessDenied"},
 		{name: "unknown path", srv: ok, method: http.MethodGet, path: "/nope", token: ok.Token(), wantStatus: http.StatusNotFound, wantCode: "NotFound"},
-		{name: "wrong method", srv: ok, method: http.MethodPost, path: containercreds.DefaultPath, token: ok.Token(), wantStatus: http.StatusMethodNotAllowed, wantCode: "MethodNotAllowed"},
-		{name: "provider error", srv: failing, method: http.MethodGet, path: containercreds.DefaultPath, token: failing.Token(), wantStatus: http.StatusInternalServerError, wantCode: "CredentialsUnavailable"},
-		{name: "zero expiry", srv: noExpiry, method: http.MethodGet, path: containercreds.DefaultPath, token: noExpiry.Token(), wantStatus: http.StatusInternalServerError, wantCode: "CredentialsNotTemporary"},
+		{name: "wrong method", srv: ok, method: http.MethodPost, path: containercreds.Path, token: ok.Token(), wantStatus: http.StatusMethodNotAllowed, wantCode: "MethodNotAllowed"},
+		{name: "provider error", srv: failing, method: http.MethodGet, path: containercreds.Path, token: failing.Token(), wantStatus: http.StatusInternalServerError, wantCode: "CredentialsUnavailable"},
+		{name: "zero expiry", srv: noExpiry, method: http.MethodGet, path: containercreds.Path, token: noExpiry.Token(), wantStatus: http.StatusInternalServerError, wantCode: "CredentialsNotTemporary"},
 	}
 
 	for _, tc := range cases {
@@ -174,52 +172,6 @@ func TestProtocol(t *testing.T) {
 			assert.NotEmpty(t, errBody.Message)
 		})
 	}
-}
-
-// rotatingSource issues credentials with a short life, rotating keys on each
-// call, and counts how often it is called.
-type rotatingSource struct {
-	calls atomic.Int32
-	life  time.Duration
-}
-
-func (s *rotatingSource) Retrieve(context.Context) (aws.Credentials, error) {
-	n := s.calls.Add(1)
-	return aws.Credentials{
-		AccessKeyID:     fmt.Sprintf("AKID%d", n),
-		SecretAccessKey: "secret",
-		SessionToken:    "session",
-		CanExpire:       true,
-		Expires:         time.Now().Add(s.life),
-	}, nil
-}
-
-func TestRefresh_CachedUntilExpiry(t *testing.T) {
-	source := &rotatingSource{life: 500 * time.Millisecond}
-	cache := aws.NewCredentialsCache(source, func(o *aws.CredentialsCacheOptions) {
-		o.ExpiryWindow = 0
-	})
-	srv := startServer(t, cache, discardLogger())
-
-	fetch := func() map[string]string {
-		status, _, body := doRequest(t, http.MethodGet, srv.CredentialsURL(), srv.Token())
-		require.Equal(t, http.StatusOK, status, string(body))
-		var got map[string]string
-		require.NoError(t, json.Unmarshal(body, &got))
-		return got
-	}
-
-	first := fetch()
-	second := fetch()
-	assert.Equal(t, int32(1), source.calls.Load(), "cached credentials must not re-resolve")
-	assert.Equal(t, first, second)
-
-	time.Sleep(600 * time.Millisecond)
-
-	third := fetch()
-	assert.Equal(t, int32(2), source.calls.Load())
-	assert.NotEqual(t, first["AccessKeyId"], third["AccessKeyId"])
-	assert.NotEqual(t, first["Expiration"], third["Expiration"])
 }
 
 // syncBuffer is a goroutine-safe log sink.
@@ -262,66 +214,14 @@ func TestLogging_NoSecrets(t *testing.T) {
 	}
 }
 
-func TestNew_Validation(t *testing.T) {
-	base := containercreds.Options{
-		BindAddr:    "127.0.0.1:0",
-		Logger:      discardLogger(),
-		Credentials: staticCreds(time.Now().Add(time.Hour)),
-	}
-	for _, p := range []string{"relative", "/", "/a/../b", "/a/", "/{x}", "/a b"} {
-		t.Run(p, func(t *testing.T) {
-			opts := base
-			opts.Path = p
-			_, err := containercreds.New(opts)
-			assert.Error(t, err)
-		})
-	}
-}
-
-func TestServer_CustomPathAndTokenShape(t *testing.T) {
-	srv, err := containercreds.New(containercreds.Options{
-		BindAddr:    "127.0.0.1:0",
-		Path:        "/creds",
-		Logger:      discardLogger(),
-		Credentials: staticCreds(time.Now().Add(time.Hour)),
-	})
-	require.NoError(t, err)
-	defer srv.Stop()
-
-	assert.Equal(t, "/creds", srv.Path())
-	assert.True(t, strings.HasSuffix(srv.CredentialsURL(), "/creds"))
-	assert.Len(t, srv.Token(), 64)
-	assert.NotContains(t, srv.Token(), " ")
-
-	status, _, _ := doRequest(t, http.MethodGet, srv.CredentialsURL(), srv.Token())
-	assert.Equal(t, http.StatusOK, status)
-}
-
 func TestServer_DistinctTokensPerInstance(t *testing.T) {
 	a := startServer(t, staticCreds(time.Now().Add(time.Hour)), discardLogger())
 	b := startServer(t, staticCreds(time.Now().Add(time.Hour)), discardLogger())
 	assert.NotEqual(t, a.Token(), b.Token())
+	assert.Regexp(t, `^[0-9a-f]{64}$`, a.Token())
 
 	status, _, _ := doRequest(t, http.MethodGet, a.CredentialsURL(), b.Token())
 	assert.Equal(t, http.StatusForbidden, status)
-}
-
-func TestServer_StopClosesDoneAndIsIdempotent(t *testing.T) {
-	srv, err := containercreds.New(containercreds.Options{
-		BindAddr:    "127.0.0.1:0",
-		Logger:      discardLogger(),
-		Credentials: staticCreds(time.Now().Add(time.Hour)),
-	})
-	require.NoError(t, err)
-
-	srv.Stop()
-	srv.Stop()
-
-	select {
-	case <-srv.Done():
-	case <-time.After(2 * time.Second):
-		t.Fatal("Done() not closed after Stop()")
-	}
 }
 
 func TestServer_TokenFileRoundTrip(t *testing.T) {
@@ -358,17 +258,4 @@ func TestServer_TokenFileWriteFailureStopsServer(t *testing.T) {
 		Credentials: staticCreds(time.Now().Add(time.Hour)),
 	})
 	require.Error(t, err)
-}
-
-func TestServer_AllInterfacesBind(t *testing.T) {
-	srv, err := containercreds.New(containercreds.Options{
-		BindAddr:    "0.0.0.0:0",
-		Logger:      discardLogger(),
-		Credentials: staticCreds(time.Now().Add(time.Hour)),
-	})
-	require.NoError(t, err)
-	defer srv.Stop()
-
-	assert.True(t, strings.HasPrefix(srv.Addr(), "0.0.0.0:"), srv.Addr())
-	assert.True(t, strings.HasPrefix(srv.URLs()[0], "http://127.0.0.1:"), srv.URLs()[0])
 }

@@ -20,15 +20,14 @@ import (
 // given its own deadline instead.
 const retrieveTimeout = 30 * time.Second
 
-// CredentialProvider abstracts AWS credential retrieval. Production wiring
-// supplies a provider wrapped in aws.CredentialsCache; the server adds no
-// caching of its own.
+// CredentialProvider abstracts AWS credential retrieval. The server adds no
+// caching; production wiring supplies an aws.CredentialsCache.
 type CredentialProvider interface {
 	Retrieve(ctx context.Context) (aws.Credentials, error)
 }
 
-// credentialsResponse is the container credentials protocol success shape.
-// Expiration is always present, so SDKs treat the credentials as refreshable.
+// credentialsResponse is the protocol success shape. Expiration is always
+// present: SDKs treat its absence as static credentials and never refresh.
 type credentialsResponse struct {
 	AccessKeyID     string `json:"AccessKeyId"`
 	SecretAccessKey string `json:"SecretAccessKey"`
@@ -45,7 +44,6 @@ type errorResponse struct {
 }
 
 type handler struct {
-	path  string
 	token []byte
 	creds CredentialProvider
 }
@@ -53,13 +51,13 @@ type handler struct {
 // newHandler builds the request pipeline: request logging, then
 // authorisation, then routing. Authorisation precedes routing so that an
 // unauthenticated caller cannot discover which paths exist.
-func newHandler(path string, token []byte, logger *slog.Logger, creds CredentialProvider) http.Handler {
-	h := &handler{path: path, token: token, creds: creds}
+func newHandler(token []byte, logger *slog.Logger, creds CredentialProvider) http.Handler {
+	h := &handler{token: token, creds: creds}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET "+path, h.handleCredentials)
-	mux.HandleFunc(path, h.handleMethodNotAllowed)
-	mux.HandleFunc("/", h.handleNotFound)
+	mux.HandleFunc("GET "+Path, h.handleCredentials)
+	mux.HandleFunc(Path, handleMethodNotAllowed)
+	mux.HandleFunc("/", handleNotFound)
 
 	return alice.New(httplog.Middleware(logger), h.authorise).Then(mux)
 }
@@ -106,28 +104,14 @@ func (h *handler) handleCredentials(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expiry, err := creds.Expires.UTC().MarshalText()
-	if err != nil {
-		logger.Error("failed to format credential expiry", "error", err)
-		writeError(w, http.StatusInternalServerError, "InternalError", "Failed to build response")
-		return
-	}
-
-	body, err := json.Marshal(credentialsResponse{
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(credentialsResponse{
 		AccessKeyID:     creds.AccessKeyID,
 		SecretAccessKey: creds.SecretAccessKey,
 		Token:           creds.SessionToken,
-		Expiration:      string(expiry),
+		Expiration:      creds.Expires.UTC().Format(time.RFC3339),
 		AccountID:       creds.AccountID,
 	})
-	if err != nil {
-		logger.Error("failed to marshal credentials response", "error", err)
-		writeError(w, http.StatusInternalServerError, "InternalError", "Failed to build response")
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(body)
 }
 
 // checkTemporary rejects credentials that cannot be served in the refreshable
@@ -143,18 +127,17 @@ func checkTemporary(creds aws.Credentials) error {
 	return nil
 }
 
-func (h *handler) handleMethodNotAllowed(w http.ResponseWriter, _ *http.Request) {
+func handleMethodNotAllowed(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Allow", "GET, HEAD")
 	writeError(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "Method not allowed")
 }
 
-func (h *handler) handleNotFound(w http.ResponseWriter, _ *http.Request) {
+func handleNotFound(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusNotFound, "NotFound", "Not found")
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
-	body, _ := json.Marshal(errorResponse{Code: code, Message: message})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_, _ = w.Write(body)
+	_ = json.NewEncoder(w).Encode(errorResponse{Code: code, Message: message})
 }
