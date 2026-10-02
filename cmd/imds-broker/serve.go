@@ -139,14 +139,22 @@ func serveCommand(resolve profileResolver) *cli.Command {
 				<-srv.Done()
 			}()
 
-			select {
-			case <-ctx.Done():
-				logger.Info("shutting down")
-			case <-srv.Done():
-				logger.Error("server exited unexpectedly")
-			}
-			return nil
+			return awaitShutdown(ctx, srv, logger)
 		},
+	}
+}
+
+// awaitShutdown blocks until a signal cancels ctx or the server stops on its
+// own. An unexpected stop is an error, so the process exits non-zero and a
+// supervisor using restart-on-failure restarts the broker.
+func awaitShutdown(ctx context.Context, srv broker.Server, logger *slog.Logger) error {
+	select {
+	case <-ctx.Done():
+		logger.Info("shutting down")
+		return nil
+	case <-srv.Done():
+		logger.Error("server exited unexpectedly")
+		return errors.New("serve: server exited unexpectedly")
 	}
 }
 
