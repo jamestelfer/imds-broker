@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -223,4 +224,31 @@ func TestServeIMDS_DefaultProtocolStillServesIMDS(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve did not exit after cancellation")
 	}
+}
+
+// stubServer is a broker.Server whose Done channel the test controls.
+type stubServer struct{ done chan struct{} }
+
+func (s stubServer) URLs() []string        { return nil }
+func (s stubServer) Stop()                 {}
+func (s stubServer) Done() <-chan struct{} { return s.done }
+
+func TestAwaitShutdown(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+
+	t.Run("signal returns nil", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		assert.NoError(t, awaitShutdown(ctx, stubServer{done: make(chan struct{})}, logger))
+	})
+
+	// A non-zero exit lets supervisors with restart: on-failure restart the
+	// broker.
+	t.Run("unexpected server exit returns error", func(t *testing.T) {
+		done := make(chan struct{})
+		close(done)
+		err := awaitShutdown(t.Context(), stubServer{done: done}, logger)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "server exited unexpectedly")
+	})
 }
