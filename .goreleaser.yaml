@@ -44,8 +44,6 @@ homebrew_casks:
     directory: Casks
     homepage: "https://github.com/jamestelfer/imds-broker"
     description: "AWS IMDSv2-compatible credential server for local development and CI"
-    url:
-      verified: "github.com/jamestelfer/imds-broker"
     repository:
       owner: jamestelfer
       name: homebrew-tap
@@ -55,11 +53,14 @@ homebrew_casks:
     # skip publishing the cask on a prerelease. release.prerelease: auto only
     # marks the RELEASE as prerelease — it does NOT gate the cask push.
     skip_upload: auto
-    # remove the macOS quarantine xattr so the binary runs without a Gatekeeper
-    # prompt after `brew install`.
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system "xattr", "-dr", "com.apple.quarantine", "#{staged_path}/imds-broker"
-          end
+    # hooks.post.install emits the `postflight` stanza, which Homebrew has
+    # deprecated in favour of `postflight_steps`. custom_block carries the step
+    # until goreleaser ships hooks.post.install_steps (goreleaser/goreleaser#6873).
+    # `{{ "{{staged_path}}" }}` escapes Homebrew's `{{staged_path}}` token past
+    # goreleaser's template pass over the rendered cask.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/imds-broker"]
+        end
+      end
