@@ -14,7 +14,10 @@ import (
 	"gopkg.in/ini.v1"
 )
 
-// DefaultFilter is the regex applied when no filter is specified.
+// DefaultFilter is the regex applied when no filter is specified. It is
+// deliberately unanchored: filters match anywhere in the name, so the default
+// admits SSO-style names such as "acme-prod-ReadOnly" without listing account
+// prefixes. Anchor a custom filter (^...$) to require an exact match.
 const DefaultFilter = `ReadOnly|ViewOnly`
 
 // NamePattern is the JSON Schema pattern a profile name must match: at least

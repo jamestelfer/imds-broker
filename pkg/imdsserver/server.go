@@ -1,18 +1,13 @@
 package imdsserver
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
-	"net/http"
-	"runtime/debug"
-	"sync"
-	"time"
-)
 
-const shutdownTimeout = 2 * time.Second
+	"github.com/jamestelfer/imds-broker/pkg/httpserve"
+)
 
 // Options configures an IMDS server instance.
 type Options struct {
@@ -38,9 +33,7 @@ type Options struct {
 
 // Server is a running IMDS-compatible HTTP server.
 type Server struct {
-	urls []string
-	stop func()
-	done chan struct{}
+	*httpserve.Server
 }
 
 // New starts an IMDS server according to opts. Each entry in opts.BindAddrs
@@ -50,95 +43,18 @@ func New(opts Options) (*Server, error) {
 		return nil, errors.New("imdsserver: at least one bind address is required")
 	}
 
-	handler := newHandler(opts.Region, opts.PrincipalName, opts.AccountID, opts.Logger, opts.Credentials)
-
-	lc := &net.ListenConfig{}
 	listeners := make([]net.Listener, 0, len(opts.BindAddrs))
 	for _, addr := range opts.BindAddrs {
-		rawLn, err := lc.Listen(context.Background(), "tcp", addr)
+		ln, err := httpserve.Listen(addr)
 		if err != nil {
-			// Close listeners already opened before returning.
 			for _, l := range listeners {
-				if cerr := l.Close(); cerr != nil {
-					opts.Logger.Error("imdsserver: listener cleanup error", "error", cerr)
-				}
+				_ = l.Close()
 			}
 			return nil, fmt.Errorf("imdsserver: listen on %s: %w", addr, err)
 		}
-		listeners = append(listeners, newFilteredListener(rawLn, opts.Logger))
+		listeners = append(listeners, newFilteredListener(ln, opts.Logger))
 	}
 
-	urls := make([]string, len(listeners))
-	for i, ln := range listeners {
-		addr := ln.Addr().String()
-		if host, port, err := net.SplitHostPort(addr); err == nil && host == "0.0.0.0" {
-			addr = net.JoinHostPort("127.0.0.1", port)
-		}
-		urls[i] = "http://" + addr
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-
-	servers := make([]*http.Server, len(listeners))
-	for i, ln := range listeners {
-		srv := &http.Server{
-			Handler:           handler,
-			ReadHeaderTimeout: 10 * time.Second,
-		}
-		servers[i] = srv
-		go func(s *http.Server, l net.Listener) {
-			defer func() {
-				if r := recover(); r != nil {
-					opts.Logger.Error("imds server panic recovered",
-						"addr", l.Addr(),
-						"panic", fmt.Sprintf("%v", r),
-						"stack", string(debug.Stack()))
-					cancel()
-				}
-			}()
-			if err := s.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				opts.Logger.Error("imds server error", "addr", l.Addr(), "error", err)
-			}
-		}(srv, ln)
-	}
-
-	// Shutdown goroutine: waits for context cancellation, then shuts down all servers.
-	go func() {
-		defer close(done)
-		<-ctx.Done()
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer shutdownCancel()
-		for _, srv := range servers {
-			if err := srv.Shutdown(shutdownCtx); err != nil {
-				opts.Logger.Error("imds server shutdown error", "error", err)
-			}
-		}
-	}()
-
-	stopOnce := sync.Once{}
-	stopFn := func() {
-		stopOnce.Do(cancel)
-	}
-
-	return &Server{
-		urls: urls,
-		stop: stopFn,
-		done: done,
-	}, nil
-}
-
-// URLs returns the HTTP base URLs for each listener bound by this server.
-func (s *Server) URLs() []string {
-	return s.urls
-}
-
-// Stop initiates a hard shutdown. Safe to call multiple times.
-func (s *Server) Stop() {
-	s.stop()
-}
-
-// Done returns a channel that is closed when all listeners have stopped.
-func (s *Server) Done() <-chan struct{} {
-	return s.done
+	handler := newHandler(opts.Region, opts.PrincipalName, opts.AccountID, opts.Logger, opts.Credentials)
+	return &Server{httpserve.Start(handler, listeners, opts.Logger)}, nil
 }
