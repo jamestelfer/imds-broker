@@ -37,7 +37,7 @@ func newTestHandler(t *testing.T) http.Handler {
 // getToken obtains a valid IMDSv2 token from the handler.
 func getToken(t *testing.T, h http.Handler, ttl int) string {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPut, "/latest/api/token", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/latest/api/token", nil)
 	req.Header.Set(headerTokenTTL, fmt.Sprintf("%d", ttl))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -49,7 +49,7 @@ func getToken(t *testing.T, h http.Handler, ttl int) string {
 
 func TestPutToken_ValidTTL(t *testing.T) {
 	h := newTestHandler(t)
-	req := httptest.NewRequest(http.MethodPut, "/latest/api/token", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/latest/api/token", nil)
 	req.Header.Set(headerTokenTTL, "60")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -77,7 +77,7 @@ func TestPutToken_TTLBoundaries(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run("ttl="+tc.ttl, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPut, "/latest/api/token", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/latest/api/token", nil)
 			if tc.ttl != "" {
 				req.Header.Set(headerTokenTTL, tc.ttl)
 			}
@@ -104,7 +104,7 @@ func TestAuthMiddleware_MissingToken(t *testing.T) {
 		"/latest/dynamic/instance-identity/document",
 	} {
 		t.Run(path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusUnauthorized, w.Code)
@@ -114,7 +114,7 @@ func TestAuthMiddleware_MissingToken(t *testing.T) {
 
 func TestAuthMiddleware_InvalidToken(t *testing.T) {
 	h := newTestHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/latest/meta-data/placement/region", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/latest/meta-data/placement/region", nil)
 	req.Header.Set(headerToken, "invalid.token")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -127,13 +127,13 @@ func TestAuthMiddleware_ExpiredToken(t *testing.T) {
 	otherLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	other := newHandler("us-west-2", "OtherRole", "", otherLogger, testCreds())
 
-	req := httptest.NewRequest(http.MethodPut, "/latest/api/token", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/latest/api/token", nil)
 	req.Header.Set(headerTokenTTL, "60")
 	w := httptest.NewRecorder()
 	other.ServeHTTP(w, req)
 	foreignToken := w.Body.String()
 
-	req2 := httptest.NewRequest(http.MethodGet, "/latest/meta-data/placement/region", nil)
+	req2 := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/latest/meta-data/placement/region", nil)
 	req2.Header.Set(headerToken, foreignToken)
 	w2 := httptest.NewRecorder()
 	h.ServeHTTP(w2, req2)
@@ -146,7 +146,7 @@ func TestAvailabilityZoneEndpoint(t *testing.T) {
 	h := newTestHandler(t)
 	tok := getToken(t, h, 60)
 
-	req := httptest.NewRequest(http.MethodGet, "/latest/meta-data/placement/availability-zone/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/latest/meta-data/placement/availability-zone/", nil)
 	req.Header.Set(headerToken, tok)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -161,7 +161,7 @@ func TestRegionEndpoint(t *testing.T) {
 	h := newTestHandler(t)
 	tok := getToken(t, h, 60)
 
-	req := httptest.NewRequest(http.MethodGet, "/latest/meta-data/placement/region", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/latest/meta-data/placement/region", nil)
 	req.Header.Set(headerToken, tok)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -176,7 +176,7 @@ func TestCredentialListingEndpoint(t *testing.T) {
 	h := newTestHandler(t)
 	tok := getToken(t, h, 60)
 
-	req := httptest.NewRequest(http.MethodGet, "/latest/meta-data/iam/security-credentials/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/latest/meta-data/iam/security-credentials/", nil)
 	req.Header.Set(headerToken, tok)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -191,7 +191,7 @@ func TestCredentialDetailEndpoint(t *testing.T) {
 	h := newTestHandler(t)
 	tok := getToken(t, h, 60)
 
-	req := httptest.NewRequest(http.MethodGet, "/latest/meta-data/iam/security-credentials/TestRole", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/latest/meta-data/iam/security-credentials/TestRole", nil)
 	req.Header.Set(headerToken, tok)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -213,7 +213,7 @@ func TestInstanceIdentityDocumentEndpoint(t *testing.T) {
 	h := newTestHandler(t)
 	tok := getToken(t, h, 60)
 
-	req := httptest.NewRequest(http.MethodGet, "/latest/dynamic/instance-identity/document", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/latest/dynamic/instance-identity/document", nil)
 	req.Header.Set(headerToken, tok)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -239,7 +239,7 @@ func TestCredentialDetailEndpoint_WrongRole(t *testing.T) {
 	h := newTestHandler(t)
 	tok := getToken(t, h, 60)
 
-	req := httptest.NewRequest(http.MethodGet, "/latest/meta-data/iam/security-credentials/WrongRole", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/latest/meta-data/iam/security-credentials/WrongRole", nil)
 	req.Header.Set(headerToken, tok)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
