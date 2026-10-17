@@ -27,8 +27,8 @@ type Options struct {
 	// BindAddr is the "host:port" address to listen on. Port 0 selects an
 	// ephemeral port.
 	BindAddr string
-	// TokenFile, when set, receives the authorisation token after the
-	// listener binds, so a present, non-empty file signals readiness. It is
+	// TokenFile, when set, receives the authorisation token once the listener
+	// is bound, so a present, non-empty file signals readiness. It is
 	// removed on shutdown if it still holds this server's token.
 	TokenFile string
 	Logger    *slog.Logger
@@ -62,6 +62,13 @@ func New(opts Options) (*Server, error) {
 		return nil, fmt.Errorf("containercreds: listen on %s: %w", opts.BindAddr, err)
 	}
 
+	if opts.TokenFile != "" {
+		if err := writeTokenFile(opts.TokenFile, token); err != nil {
+			_ = ln.Close()
+			return nil, err
+		}
+	}
+
 	logger := opts.Logger.With("profile", opts.Profile, "region", opts.Region)
 	s := &Server{
 		http:  httpserve.Start(newHandler(token, logger, opts.Credentials), []net.Listener{ln}, logger),
@@ -80,14 +87,6 @@ func New(opts Options) (*Server, error) {
 			logger.Error("token file cleanup error", "error", err)
 		}
 	}()
-
-	if opts.TokenFile != "" {
-		if err := writeTokenFile(opts.TokenFile, token); err != nil {
-			s.Stop()
-			<-s.Done()
-			return nil, err
-		}
-	}
 
 	return s, nil
 }

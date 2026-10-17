@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -250,12 +251,21 @@ func TestServer_TokenFileRoundTrip(t *testing.T) {
 	assert.NoFileExists(t, path)
 }
 
-func TestServer_TokenFileWriteFailureStopsServer(t *testing.T) {
-	_, err := containercreds.New(containercreds.Options{
-		BindAddr:    "127.0.0.1:0",
+func TestServer_TokenFileWriteFailureReleasesListener(t *testing.T) {
+	probe, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp4", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := probe.Addr().String()
+	require.NoError(t, probe.Close())
+
+	_, err = containercreds.New(containercreds.Options{
+		BindAddr:    addr,
 		TokenFile:   filepath.Join(t.TempDir(), "absent", "token"),
 		Logger:      discardLogger(),
 		Credentials: staticCreds(time.Now().Add(time.Hour)),
 	})
 	require.Error(t, err)
+
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp4", addr)
+	require.NoError(t, err, "listener should be released after a failed start")
+	_ = ln.Close()
 }
