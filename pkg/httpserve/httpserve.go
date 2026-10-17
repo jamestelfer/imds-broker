@@ -50,7 +50,11 @@ func Start(handler http.Handler, listeners []net.Listener, logger *slog.Logger) 
 	servers := make([]*http.Server, len(listeners))
 	for i, ln := range listeners {
 		s.urls[i] = "http://" + localAddr(ln.Addr().String())
-		servers[i] = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+		servers[i] = &http.Server{
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		}
 		go serve(servers[i], ln, cancel, logger)
 	}
 
