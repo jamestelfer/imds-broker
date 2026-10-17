@@ -24,7 +24,7 @@ import (
 
 // serverStarter starts the server for the selected protocol and logs where it
 // listens.
-type serverStarter func(bindAddr, profile string, rp awscreds.ResolvedProfile, logger *slog.Logger) (broker.Server, error)
+type serverStarter func(ctx context.Context, bindAddr, profile string, rp awscreds.ResolvedProfile, logger *slog.Logger) (broker.Server, error)
 
 // serveOptions holds the validated serve flags.
 type serveOptions struct {
@@ -130,7 +130,7 @@ func serveCommand(resolve profileResolver) *cli.Command {
 				return fmt.Errorf("serve: %w", err)
 			}
 
-			srv, err := opts.start(opts.bindAddr, profile, rp, logger)
+			srv, err := opts.start(ctx, opts.bindAddr, profile, rp, logger)
 			if err != nil {
 				return fmt.Errorf("serve: start server: %w", err)
 			}
@@ -158,7 +158,7 @@ func awaitShutdown(ctx context.Context, srv broker.Server, logger *slog.Logger) 
 	}
 }
 
-func startIMDS(bindAddr, profile string, rp awscreds.ResolvedProfile, logger *slog.Logger) (broker.Server, error) {
+func startIMDS(_ context.Context, bindAddr, profile string, rp awscreds.ResolvedProfile, logger *slog.Logger) (broker.Server, error) {
 	srv, err := imdsserver.New(imdsserver.Options{
 		Profile:       profile,
 		Region:        rp.Region,
@@ -176,8 +176,8 @@ func startIMDS(bindAddr, profile string, rp awscreds.ResolvedProfile, logger *sl
 }
 
 func containerStarter(tokenFile string) serverStarter {
-	return func(bindAddr, profile string, rp awscreds.ResolvedProfile, logger *slog.Logger) (broker.Server, error) {
-		srv, err := containercreds.New(containercreds.Options{
+	return func(ctx context.Context, bindAddr, profile string, rp awscreds.ResolvedProfile, logger *slog.Logger) (broker.Server, error) {
+		srv, err := containercreds.New(ctx, containercreds.Options{
 			Profile:     profile,
 			Region:      rp.Region,
 			BindAddr:    bindAddr,

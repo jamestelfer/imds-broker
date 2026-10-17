@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,13 +47,26 @@ func staticCreds(expires time.Time) aws.CredentialsProvider {
 	})
 }
 
+// afterStartup serves valid credentials for the startup check, then
+// delegates to later, so tests can exercise request-time failures.
+func afterStartup(later aws.CredentialsProvider) aws.CredentialsProvider {
+	var started atomic.Bool
+	valid := staticCreds(time.Now().Add(time.Hour))
+	return aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
+		if started.CompareAndSwap(false, true) {
+			return valid.Retrieve(ctx)
+		}
+		return later.Retrieve(ctx)
+	})
+}
+
 func discardLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
 func startServer(t *testing.T, creds aws.CredentialsProvider, logger *slog.Logger) *containercreds.Server {
 	t.Helper()
-	srv, err := containercreds.New(containercreds.Options{
+	srv, err := containercreds.New(t.Context(), containercreds.Options{
 		Profile:     "test",
 		Region:      "us-east-1",
 		BindAddr:    "127.0.0.1:0",
@@ -101,9 +115,9 @@ func TestSDKRoundTrip_EndpointCreds(t *testing.T) {
 }
 
 func TestSDKRoundTrip_ErrorDecodes(t *testing.T) {
-	failing := aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+	failing := afterStartup(aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
 		return aws.Credentials{}, errors.New("boom")
-	})
+	}))
 	srv := startServer(t, failing, discardLogger())
 
 	provider := endpointcreds.New(srv.CredentialsURL(), func(o *endpointcreds.Options) {
@@ -119,10 +133,10 @@ func TestSDKRoundTrip_ErrorDecodes(t *testing.T) {
 func TestProtocol(t *testing.T) {
 	expires := time.Now().Add(time.Hour)
 	ok := startServer(t, staticCreds(expires), discardLogger())
-	failing := startServer(t, aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+	failing := startServer(t, afterStartup(aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
 		return aws.Credentials{}, errors.New("resolution failed")
-	}), discardLogger())
-	noExpiry := startServer(t, staticCreds(time.Time{}), discardLogger())
+	})), discardLogger())
+	noExpiry := startServer(t, afterStartup(staticCreds(time.Time{})), discardLogger())
 
 	cases := []struct {
 		name       string
@@ -198,9 +212,9 @@ func TestLogging_NoSecrets(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	ok := startServer(t, staticCreds(time.Now().Add(time.Hour)), logger)
-	failing := startServer(t, aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+	failing := startServer(t, afterStartup(aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
 		return aws.Credentials{}, errors.New("resolution failed")
-	}), logger)
+	})), logger)
 
 	doRequest(t, http.MethodGet, ok.CredentialsURL(), ok.Token())
 	doRequest(t, http.MethodGet, ok.CredentialsURL(), "")
@@ -227,7 +241,7 @@ func TestServer_DistinctTokensPerInstance(t *testing.T) {
 
 func TestServer_TokenFileRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
-	srv, err := containercreds.New(containercreds.Options{
+	srv, err := containercreds.New(t.Context(), containercreds.Options{
 		BindAddr:    "127.0.0.1:0",
 		TokenFile:   path,
 		Logger:      discardLogger(),
@@ -257,7 +271,7 @@ func TestServer_TokenFileWriteFailureReleasesListener(t *testing.T) {
 	addr := probe.Addr().String()
 	require.NoError(t, probe.Close())
 
-	_, err = containercreds.New(containercreds.Options{
+	_, err = containercreds.New(t.Context(), containercreds.Options{
 		BindAddr:    addr,
 		TokenFile:   filepath.Join(t.TempDir(), "absent", "token"),
 		Logger:      discardLogger(),
@@ -268,4 +282,16 @@ func TestServer_TokenFileWriteFailureReleasesListener(t *testing.T) {
 	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp4", addr)
 	require.NoError(t, err, "listener should be released after a failed start")
 	_ = ln.Close()
+}
+
+func TestServer_RejectsNonRefreshableCredentialsAtStartup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	_, err := containercreds.New(t.Context(), containercreds.Options{
+		BindAddr:    "127.0.0.1:0",
+		TokenFile:   path,
+		Logger:      discardLogger(),
+		Credentials: staticCreds(time.Time{}),
+	})
+	require.ErrorContains(t, err, "no expiry")
+	assert.NoFileExists(t, path, "a rejected server must not signal readiness")
 }

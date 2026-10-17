@@ -4,6 +4,7 @@
 package containercreds
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -45,11 +46,18 @@ type Server struct {
 	done  chan struct{}
 }
 
-// New binds a listener, generates an authorisation token, and starts serving
-// the credentials returned by opts.Credentials.
-func New(opts Options) (*Server, error) {
+// New checks that opts.Credentials vends refreshable credentials, binds a
+// listener, generates an authorisation token, and starts serving.
+func New(ctx context.Context, opts Options) (*Server, error) {
 	if opts.Credentials == nil {
 		return nil, errors.New("containercreds: credential provider is required")
+	}
+	creds, err := opts.Credentials.Retrieve(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("containercreds: retrieve credentials: %w", err)
+	}
+	if err := checkTemporary(creds); err != nil {
+		return nil, fmt.Errorf("containercreds: %w", err)
 	}
 
 	token, err := newToken()
