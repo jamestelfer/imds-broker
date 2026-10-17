@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+
 	"github.com/jamestelfer/imds-broker/pkg/httpserve"
 )
 
@@ -28,7 +30,7 @@ type Options struct {
 	// Logger is used for request and error logging.
 	Logger *slog.Logger
 	// Credentials provides AWS credentials to the credential detail endpoint.
-	Credentials CredentialProvider
+	Credentials aws.CredentialsProvider
 }
 
 // Server is a running IMDS-compatible HTTP server.

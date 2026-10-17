@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+
 	"github.com/jamestelfer/imds-broker/pkg/httpserve"
 )
 
@@ -30,8 +32,9 @@ type Options struct {
 	// removed on shutdown if it still holds this server's token.
 	TokenFile string
 	Logger    *slog.Logger
-	// Credentials provides the AWS credentials served at Path.
-	Credentials CredentialProvider
+	// Credentials provides the AWS credentials served at Path. The server adds
+	// no caching, so pass an aws.CredentialsCache.
+	Credentials aws.CredentialsProvider
 }
 
 // Server is a running container credentials HTTP server.

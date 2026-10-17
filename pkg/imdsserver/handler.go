@@ -1,7 +1,6 @@
 package imdsserver
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -22,13 +21,6 @@ const (
 	headerForward  = "X-Forwarded-For"
 )
 
-// CredentialProvider abstracts AWS credential retrieval.
-// In production, this is backed by the AWS SDK credential chain.
-// In tests, a mock implementation is injected.
-type CredentialProvider interface {
-	Retrieve(ctx context.Context) (aws.Credentials, error)
-}
-
 // credentialResponse is the IMDS JSON shape for credential endpoints.
 type credentialResponse struct {
 	Code            string `json:"Code"`
@@ -46,7 +38,7 @@ type imdsHandler struct {
 	principalName string
 	accountID     string
 	logger        *slog.Logger
-	creds         CredentialProvider
+	creds         aws.CredentialsProvider
 	tok           *token
 }
 
@@ -63,7 +55,7 @@ type identityDocumentResponse struct {
 // principalName is the identity name returned by the credential listing endpoint
 // (in production, derived from STS GetCallerIdentity at startup).
 // accountID is the AWS account ID included in the instance identity document.
-func newHandler(region, principalName, accountID string, logger *slog.Logger, creds CredentialProvider) http.Handler {
+func newHandler(region, principalName, accountID string, logger *slog.Logger, creds aws.CredentialsProvider) http.Handler {
 	h := &imdsHandler{
 		region:        region,
 		principalName: principalName,

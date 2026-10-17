@@ -32,7 +32,7 @@ const (
 	testSessionToken = "AQoDYXdzEJr//fake-session-token"
 )
 
-func staticCreds(expires time.Time) containercreds.CredentialProvider {
+func staticCreds(expires time.Time) aws.CredentialsProvider {
 	creds := aws.Credentials{
 		AccessKeyID:     testAccessKey,
 		SecretAccessKey: testSecretKey,
@@ -49,7 +49,7 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
-func startServer(t *testing.T, creds containercreds.CredentialProvider, logger *slog.Logger) *containercreds.Server {
+func startServer(t *testing.T, creds aws.CredentialsProvider, logger *slog.Logger) *containercreds.Server {
 	t.Helper()
 	srv, err := containercreds.New(containercreds.Options{
 		Profile:     "test",

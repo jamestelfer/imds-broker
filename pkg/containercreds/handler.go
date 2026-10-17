@@ -1,7 +1,6 @@
 package containercreds
 
 import (
-	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -15,12 +14,6 @@ import (
 	"github.com/jamestelfer/imds-broker/pkg/awscreds"
 	"github.com/jamestelfer/imds-broker/pkg/httplog"
 )
-
-// CredentialProvider abstracts AWS credential retrieval. The server adds no
-// caching; production wiring supplies an aws.CredentialsCache.
-type CredentialProvider interface {
-	Retrieve(ctx context.Context) (aws.Credentials, error)
-}
 
 // credentialsResponse is the protocol success shape. Expiration is always
 // present: SDKs treat its absence as static credentials and never refresh.
@@ -41,13 +34,13 @@ type errorResponse struct {
 
 type handler struct {
 	token []byte
-	creds CredentialProvider
+	creds aws.CredentialsProvider
 }
 
 // newHandler builds the request pipeline: request logging, then
 // authorisation, then routing. Authorisation precedes routing so that an
 // unauthenticated caller cannot discover which paths exist.
-func newHandler(token []byte, logger *slog.Logger, creds CredentialProvider) http.Handler {
+func newHandler(token []byte, logger *slog.Logger, creds aws.CredentialsProvider) http.Handler {
 	h := &handler{token: token, creds: creds}
 
 	mux := http.NewServeMux()

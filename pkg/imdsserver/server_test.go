@@ -15,7 +15,7 @@ import (
 	"github.com/jamestelfer/imds-broker/pkg/imdsserver"
 )
 
-func newServerCreds() imdsserver.CredentialProvider {
+func newServerCreds() aws.CredentialsProvider {
 	creds := aws.Credentials{
 		AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
 		SecretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
