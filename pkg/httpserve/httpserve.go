@@ -62,6 +62,7 @@ func Start(handler http.Handler, listeners []net.Listener, logger *slog.Logger) 
 		for _, srv := range servers {
 			if err := srv.Shutdown(shutdownCtx); err != nil {
 				logger.Error("http server shutdown error", "error", err)
+				_ = srv.Close()
 			}
 		}
 	}()

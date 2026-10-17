@@ -2,6 +2,7 @@ package httpserve_test
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"net"
@@ -141,4 +142,40 @@ func TestStart_PanicIsRecoveredAndIsolated(t *testing.T) {
 	assert.Contains(t, logs.String(), "panic recovered")
 	assert.Contains(t, logs.String(), "induced serve loop panic")
 	require.NoError(t, get(t, bystander.URLs()[0]), "other servers must keep serving")
+}
+
+func TestStop_ClosesInFlightConnections(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	blocking := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		close(entered)
+		<-release
+	})
+	srv := httpserve.Start(blocking, []net.Listener{listen(t, "127.0.0.1:0")}, discard())
+
+	errc := make(chan error, 1)
+	go func() {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URLs()[0], nil)
+		if err != nil {
+			errc <- err
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+		errc <- err
+	}()
+	<-entered
+
+	srv.Stop()
+	waitDone(t, srv)
+
+	select {
+	case err := <-errc:
+		assert.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("in-flight connection still open after Done()")
+	}
 }
