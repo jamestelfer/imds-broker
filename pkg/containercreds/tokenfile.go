@@ -39,8 +39,9 @@ func writeTokenFile(path string, token []byte) (err error) {
 }
 
 // removeTokenFile deletes path only if it still holds token, so a stopped
-// server leaves no stale readiness signal and never deletes a token written
-// by a newer instance.
+// server leaves no stale readiness signal. A newer instance that writes path
+// between the read and the remove loses its file; instances sharing a path are
+// not expected to overlap, so the race is not worth a lock.
 func removeTokenFile(path string, token []byte) error {
 	got, err := os.ReadFile(path) //nolint:gosec // operator-supplied path
 	if errors.Is(err, os.ErrNotExist) || (err == nil && !bytes.Equal(got, token)) {

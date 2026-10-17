@@ -45,6 +45,8 @@ func newHandler(token []byte, logger *slog.Logger, creds aws.CredentialsProvider
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+Path, h.handleCredentials)
+	// Explicit 405 and 404 routes keep error bodies in the JSON shape the SDK
+	// decodes; the mux defaults are plain text.
 	mux.HandleFunc(Path, handleMethodNotAllowed)
 	mux.HandleFunc("/", handleNotFound)
 
