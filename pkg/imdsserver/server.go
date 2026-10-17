@@ -50,7 +50,9 @@ func New(opts Options) (*Server, error) {
 		ln, err := httpserve.Listen(addr)
 		if err != nil {
 			for _, l := range listeners {
-				_ = l.Close()
+				if cerr := l.Close(); cerr != nil {
+					opts.Logger.Error("listener close error", "addr", l.Addr(), "error", cerr)
+				}
 			}
 			return nil, fmt.Errorf("imdsserver: listen on %s: %w", addr, err)
 		}
