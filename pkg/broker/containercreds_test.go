@@ -31,7 +31,7 @@ type containerServers struct {
 // the existing server even if the caller wanted a different token file. That
 // is acceptable while the container protocol is reachable only through serve.
 func (c *containerServers) factory() broker.ServerFactory {
-	return func(ctx context.Context, profile, region string, bindAddrs []string, logger *slog.Logger) (broker.Server, error) {
+	return func(ctx context.Context, profile, region string, bindAddrs []string, logger *slog.Logger) (broker.Server, []slog.Attr, error) {
 		creds := aws.Credentials{
 			AccessKeyID:     "AKID-" + profile,
 			SecretAccessKey: "secret",
@@ -42,7 +42,7 @@ func (c *containerServers) factory() broker.ServerFactory {
 		srv, err := containercreds.New(ctx, containercreds.Options{
 			Profile:   profile,
 			Region:    region,
-			BindAddr:  bindAddrs[0],
+			BindAddrs: bindAddrs,
 			TokenFile: filepath.Join(c.t.TempDir(), "token"),
 			Logger:    logger,
 			Credentials: aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
@@ -50,14 +50,14 @@ func (c *containerServers) factory() broker.ServerFactory {
 			}),
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		c.created[srv.URLs()[0]] = srv
 		c.t.Cleanup(func() {
 			srv.Stop()
 			<-srv.Done()
 		})
-		return srv, nil
+		return srv, nil, nil
 	}
 }
 

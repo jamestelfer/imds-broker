@@ -194,7 +194,7 @@ imds-broker serve --profile my-profile [--region us-east-1]
 On startup the endpoint URL is logged to stderr:
 
 ```
-... INFO IMDS server listening url=http://127.0.0.1:PORT profile=my-profile
+... INFO server listening protocol=imds profile=my-profile region=us-east-1 url=http://127.0.0.1:PORT
 ```
 
 Point any AWS SDK at it:

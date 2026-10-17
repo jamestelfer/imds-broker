@@ -25,9 +25,9 @@ type Options struct {
 	// Profile and Region identify the served credentials in logs.
 	Profile string
 	Region  string
-	// BindAddr is the "host:port" address to listen on. Port 0 selects an
-	// ephemeral port.
-	BindAddr string
+	// BindAddrs must hold exactly one "host:port" address; the type matches
+	// broker.ServerFactory. Port 0 selects an ephemeral port.
+	BindAddrs []string
 	// TokenFile, when set, receives the authorisation token once the listener
 	// is bound, so a present, non-empty file signals readiness. It is
 	// removed on shutdown if it still holds this server's token.
@@ -41,7 +41,6 @@ type Options struct {
 // Server is a running container credentials HTTP server.
 type Server struct {
 	http  *httpserve.Server
-	addr  string
 	token []byte
 	done  chan struct{}
 }
@@ -49,6 +48,9 @@ type Server struct {
 // New checks that opts.Credentials vends refreshable credentials, binds a
 // listener, generates an authorisation token, and starts serving.
 func New(ctx context.Context, opts Options) (*Server, error) {
+	if len(opts.BindAddrs) != 1 {
+		return nil, fmt.Errorf("containercreds: exactly one bind address is required, got %d", len(opts.BindAddrs))
+	}
 	if opts.Credentials == nil {
 		return nil, errors.New("containercreds: credential provider is required")
 	}
@@ -65,9 +67,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		return nil, err
 	}
 
-	ln, err := httpserve.Listen(opts.BindAddr)
+	ln, err := httpserve.Listen(opts.BindAddrs[0])
 	if err != nil {
-		return nil, fmt.Errorf("containercreds: listen on %s: %w", opts.BindAddr, err)
+		return nil, fmt.Errorf("containercreds: listen on %s: %w", opts.BindAddrs[0], err)
 	}
 
 	if opts.TokenFile != "" {
@@ -80,7 +82,6 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	logger := opts.Logger.With("profile", opts.Profile, "region", opts.Region)
 	s := &Server{
 		http:  httpserve.Start(newHandler(token, logger, opts.Credentials), []net.Listener{ln}, logger),
-		addr:  ln.Addr().String(),
 		token: token,
 		done:  make(chan struct{}),
 	}
@@ -97,11 +98,6 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}()
 
 	return s, nil
-}
-
-// Addr returns the bound listener address, for example "0.0.0.0:8080".
-func (s *Server) Addr() string {
-	return s.addr
 }
 
 // URLs returns the HTTP base URL of the listener, with an all-interfaces

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/jamestelfer/imds-broker/pkg/awscreds"
+	"github.com/jamestelfer/imds-broker/pkg/broker"
 	"github.com/jamestelfer/imds-broker/pkg/containercreds"
 )
 
@@ -182,7 +184,7 @@ func TestParseServeOptions_BindAddr(t *testing.T) {
 			flags := serveCommand(nil).Flags
 			args := append([]string{"imds-broker", "sub", "--profile", "p"}, tc.args...)
 			runWith(t, flags, args, func(c *cli.Command) {
-				opts, err := parseServeOptions(c)
+				opts, err := parseServeOptions(c, nil)
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, opts.bindAddr)
 			})
@@ -251,4 +253,38 @@ func TestAwaitShutdown(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "server exited unexpectedly")
 	})
+}
+
+func TestFactories_UseInjectedResolverAndDescribeServer(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+	cases := []struct {
+		name     string
+		factory  func(profileResolver) broker.ServerFactory
+		protocol string
+	}{
+		{name: "imds", factory: imdsFactory, protocol: "imds"},
+		{name: "container", factory: func(r profileResolver) broker.ServerFactory {
+			return containerFactory(r, filepath.Join(t.TempDir(), "token"))
+		}, protocol: "container"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv, attrs, err := tc.factory(fakeResolver(&calls))(t.Context(), "p", "", []string{"127.0.0.1:0"}, logger)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				srv.Stop()
+				<-srv.Done()
+			})
+
+			assert.Equal(t, int32(1), calls.Load())
+			got := map[string]string{}
+			for _, a := range attrs {
+				got[a.Key] = a.Value.String()
+			}
+			assert.Equal(t, tc.protocol, got["protocol"])
+			assert.Equal(t, "p", got["profile"])
+			assert.Contains(t, got["url"], strings.TrimPrefix(srv.URLs()[0], "http://"))
+		})
+	}
 }

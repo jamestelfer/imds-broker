@@ -16,7 +16,6 @@ import (
 	"github.com/jamestelfer/imds-broker/pkg/awscreds"
 	"github.com/jamestelfer/imds-broker/pkg/broker"
 	brokerconfig "github.com/jamestelfer/imds-broker/pkg/config"
-	"github.com/jamestelfer/imds-broker/pkg/imdsserver"
 	"github.com/jamestelfer/imds-broker/pkg/mcpserver"
 	"github.com/jamestelfer/imds-broker/pkg/profiles"
 )
@@ -167,29 +166,6 @@ func profilesCommand() *cli.Command {
 	}
 }
 
-// profileResolver resolves a profile's credentials. Production code uses
-// awscreds.ResolveProfile; tests inject fakes.
-type profileResolver func(ctx context.Context, profile, region string) (awscreds.ResolvedProfile, error)
-
-// imdsFactory is the broker.ServerFactory used in production. It resolves
-// AWS credentials for the given profile and starts an IMDS server.
-func imdsFactory(ctx context.Context, profile, region string, bindAddrs []string, logger *slog.Logger) (broker.Server, error) {
-	pc, err := awscreds.ResolveProfile(ctx, profile, region)
-	if err != nil {
-		return nil, fmt.Errorf("mcp: %w", err)
-	}
-
-	return imdsserver.New(imdsserver.Options{
-		Profile:       profile,
-		Region:        pc.Region,
-		PrincipalName: pc.Identity.PrincipalName,
-		AccountID:     pc.Identity.AccountID,
-		BindAddrs:     bindAddrs,
-		Logger:        logger,
-		Credentials:   pc.Credentials,
-	})
-}
-
 func mcpCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "mcp",
@@ -216,7 +192,7 @@ func mcpCommand() *cli.Command {
 
 			b, err := broker.New(ctx, broker.Options{
 				Logger:        logger,
-				ServerFactory: imdsFactory,
+				ServerFactory: imdsFactory(awscreds.ResolveProfile),
 			})
 			if err != nil {
 				return fmt.Errorf("mcp: create broker: %w", err)

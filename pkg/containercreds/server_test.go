@@ -69,7 +69,7 @@ func startServer(t *testing.T, creds aws.CredentialsProvider, logger *slog.Logge
 	srv, err := containercreds.New(t.Context(), containercreds.Options{
 		Profile:     "test",
 		Region:      "us-east-1",
-		BindAddr:    "127.0.0.1:0",
+		BindAddrs:   []string{"127.0.0.1:0"},
 		Logger:      logger,
 		Credentials: creds,
 	})
@@ -242,7 +242,7 @@ func TestServer_DistinctTokensPerInstance(t *testing.T) {
 func TestServer_TokenFileRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
 	srv, err := containercreds.New(t.Context(), containercreds.Options{
-		BindAddr:    "127.0.0.1:0",
+		BindAddrs:   []string{"127.0.0.1:0"},
 		TokenFile:   path,
 		Logger:      discardLogger(),
 		Credentials: staticCreds(time.Now().Add(time.Hour)),
@@ -272,7 +272,7 @@ func TestServer_TokenFileWriteFailureReleasesListener(t *testing.T) {
 	require.NoError(t, probe.Close())
 
 	_, err = containercreds.New(t.Context(), containercreds.Options{
-		BindAddr:    addr,
+		BindAddrs:   []string{addr},
 		TokenFile:   filepath.Join(t.TempDir(), "absent", "token"),
 		Logger:      discardLogger(),
 		Credentials: staticCreds(time.Now().Add(time.Hour)),
@@ -287,11 +287,22 @@ func TestServer_TokenFileWriteFailureReleasesListener(t *testing.T) {
 func TestServer_RejectsNonRefreshableCredentialsAtStartup(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
 	_, err := containercreds.New(t.Context(), containercreds.Options{
-		BindAddr:    "127.0.0.1:0",
+		BindAddrs:   []string{"127.0.0.1:0"},
 		TokenFile:   path,
 		Logger:      discardLogger(),
 		Credentials: staticCreds(time.Time{}),
 	})
 	require.ErrorContains(t, err, "no expiry")
 	assert.NoFileExists(t, path, "a rejected server must not signal readiness")
+}
+
+func TestServer_RequiresExactlyOneBindAddr(t *testing.T) {
+	for _, addrs := range [][]string{nil, {"127.0.0.1:0", "127.0.0.1:0"}} {
+		_, err := containercreds.New(t.Context(), containercreds.Options{
+			BindAddrs:   addrs,
+			Logger:      discardLogger(),
+			Credentials: staticCreds(time.Now().Add(time.Hour)),
+		})
+		assert.ErrorContains(t, err, "exactly one bind address", "addrs: %v", addrs)
+	}
 }

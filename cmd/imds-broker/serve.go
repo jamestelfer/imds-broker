@@ -14,27 +14,20 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/jamestelfer/imds-broker/pkg/awscreds"
 	"github.com/jamestelfer/imds-broker/pkg/broker"
 	brokerconfig "github.com/jamestelfer/imds-broker/pkg/config"
-	"github.com/jamestelfer/imds-broker/pkg/containercreds"
-	"github.com/jamestelfer/imds-broker/pkg/imdsserver"
 	"github.com/jamestelfer/imds-broker/pkg/profiles"
 )
-
-// serverStarter starts the server for the selected protocol and logs where it
-// listens.
-type serverStarter func(ctx context.Context, bindAddr, profile string, rp awscreds.ResolvedProfile, logger *slog.Logger) (broker.Server, error)
 
 // serveOptions holds the validated serve flags.
 type serveOptions struct {
 	bindAddr string
-	start    serverStarter
+	factory  broker.ServerFactory
 }
 
 // parseServeOptions validates the protocol and listener flags before any AWS
 // configuration is loaded or any listener is bound.
-func parseServeOptions(cmd *cli.Command) (serveOptions, error) {
+func parseServeOptions(cmd *cli.Command, resolve profileResolver) (serveOptions, error) {
 	port := cmd.Int("port")
 	if port < 0 || port > 65535 {
 		return serveOptions{}, fmt.Errorf("--port must be between 0 and 65535, got %d", port)
@@ -46,13 +39,13 @@ func parseServeOptions(cmd *cli.Command) (serveOptions, error) {
 		if cmd.IsSet("token-file") {
 			return serveOptions{}, errors.New("--token-file requires --protocol container")
 		}
-		opts.start = startIMDS
+		opts.factory = imdsFactory(resolve)
 	case "container":
 		tokenFile := cmd.String("token-file")
 		if tokenFile == "" {
 			return serveOptions{}, errors.New("--protocol container requires --token-file")
 		}
-		opts.start = containerStarter(tokenFile)
+		opts.factory = containerFactory(resolve, tokenFile)
 	default:
 		return serveOptions{}, fmt.Errorf(`unknown --protocol %q: must be "imds" or "container"`, protocol)
 	}
@@ -100,7 +93,7 @@ func serveCommand(resolve profileResolver) *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			opts, err := parseServeOptions(cmd)
+			opts, err := parseServeOptions(cmd, resolve)
 			if err != nil {
 				return fmt.Errorf("serve: %w", err)
 			}
@@ -125,15 +118,11 @@ func serveCommand(resolve profileResolver) *cli.Command {
 			ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			rp, err := resolve(ctx, profile, effectiveRegion(cmd, bcfg))
-			if err != nil {
-				return fmt.Errorf("serve: %w", err)
-			}
-
-			srv, err := opts.start(ctx, opts.bindAddr, profile, rp, logger)
+			srv, attrs, err := opts.factory(ctx, profile, effectiveRegion(cmd, bcfg), []string{opts.bindAddr}, logger)
 			if err != nil {
 				return fmt.Errorf("serve: start server: %w", err)
 			}
+			logger.LogAttrs(ctx, slog.LevelInfo, "server listening", attrs...)
 			defer func() {
 				srv.Stop()
 				<-srv.Done()
@@ -155,44 +144,5 @@ func awaitShutdown(ctx context.Context, srv broker.Server, logger *slog.Logger) 
 	case <-srv.Done():
 		logger.Error("server exited unexpectedly")
 		return errors.New("serve: server exited unexpectedly")
-	}
-}
-
-func startIMDS(_ context.Context, bindAddr, profile string, rp awscreds.ResolvedProfile, logger *slog.Logger) (broker.Server, error) {
-	srv, err := imdsserver.New(imdsserver.Options{
-		Profile:       profile,
-		Region:        rp.Region,
-		PrincipalName: rp.Identity.PrincipalName,
-		AccountID:     rp.Identity.AccountID,
-		BindAddrs:     []string{bindAddr},
-		Logger:        logger,
-		Credentials:   rp.Credentials,
-	})
-	if err != nil {
-		return nil, err
-	}
-	logger.Info("IMDS server listening", "url", srv.URLs()[0], "profile", profile)
-	return srv, nil
-}
-
-func containerStarter(tokenFile string) serverStarter {
-	return func(ctx context.Context, bindAddr, profile string, rp awscreds.ResolvedProfile, logger *slog.Logger) (broker.Server, error) {
-		srv, err := containercreds.New(ctx, containercreds.Options{
-			Profile:     profile,
-			Region:      rp.Region,
-			BindAddr:    bindAddr,
-			TokenFile:   tokenFile,
-			Logger:      logger,
-			Credentials: rp.Credentials,
-		})
-		if err != nil {
-			return nil, err
-		}
-		logger.Info("container credentials server listening",
-			"url", srv.CredentialsURL(),
-			"addr", srv.Addr(),
-			"token_file", tokenFile,
-			"profile", profile)
-		return srv, nil
 	}
 }
