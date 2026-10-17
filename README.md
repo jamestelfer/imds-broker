@@ -229,7 +229,7 @@ Use `--port` to pin the listening port and `--bind` to restrict the listening ad
 
 #### Container credentials protocol
 
-`--protocol container` serves the AWS container credentials protocol instead of IMDS. Every AWS SDK and the AWS CLI consume it through `AWS_CONTAINER_CREDENTIALS_FULL_URI`. There is no session-token handshake: a client sends one `GET` with a bearer token.
+`--protocol container` serves the AWS container credentials protocol instead of IMDS. Every AWS SDK and the AWS CLI consume it through `AWS_CONTAINER_CREDENTIALS_FULL_URI`. There is no session-token handshake: a client sends one `GET` with the token verbatim as the `Authorization` header value, with no `Bearer` prefix.
 
 ```sh
 imds-broker serve --profile my-profile \
