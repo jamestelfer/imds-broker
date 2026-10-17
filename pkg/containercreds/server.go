@@ -1,0 +1,132 @@
+// Package containercreds implements an AWS container credentials provider
+// endpoint, the protocol SDKs consume through
+// AWS_CONTAINER_CREDENTIALS_FULL_URI and AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE.
+package containercreds
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+
+	"github.com/jamestelfer/imds-broker/pkg/httpserve"
+)
+
+// Path is the credentials path. The 2016-11-01 segment follows the AWS
+// credential endpoint convention; SDKs take the full URL from the operator
+// and do not require it.
+const Path = "/2016-11-01/credentials"
+
+// Options configures a container credentials server instance.
+type Options struct {
+	// Profile and Region identify the served credentials in logs.
+	Profile string
+	Region  string
+	// BindAddrs must hold exactly one "host:port" address; the type matches
+	// broker.ServerFactory. Port 0 selects an ephemeral port.
+	BindAddrs []string
+	// TokenFile, when set, receives the authorisation token once the listener
+	// is bound, so a present, non-empty file signals readiness. It is
+	// removed on shutdown if it still holds this server's token.
+	TokenFile string
+	Logger    *slog.Logger
+	// Credentials provides the AWS credentials served at Path. The server adds
+	// no caching, so pass an aws.CredentialsCache.
+	Credentials aws.CredentialsProvider
+}
+
+// Server is a running container credentials HTTP server.
+type Server struct {
+	http  *httpserve.Server
+	token []byte
+	done  chan struct{}
+}
+
+// New checks that opts.Credentials vends refreshable credentials, binds a
+// listener, generates an authorisation token, and starts serving.
+func New(ctx context.Context, opts Options) (*Server, error) {
+	if len(opts.BindAddrs) != 1 {
+		return nil, fmt.Errorf("containercreds: exactly one bind address is required, got %d", len(opts.BindAddrs))
+	}
+	if opts.Credentials == nil {
+		return nil, errors.New("containercreds: credential provider is required")
+	}
+	creds, err := opts.Credentials.Retrieve(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("containercreds: retrieve credentials: %w", err)
+	}
+	if err := checkTemporary(creds); err != nil {
+		return nil, fmt.Errorf("containercreds: %w", err)
+	}
+
+	token, err := newToken()
+	if err != nil {
+		return nil, err
+	}
+
+	// No peer filter: the IMDS allow-list excludes the default-route subnet, which
+	// is the shared bridge in compose. The token is the only access control.
+	ln, err := httpserve.Listen(opts.BindAddrs[0])
+	if err != nil {
+		return nil, fmt.Errorf("containercreds: listen on %s: %w", opts.BindAddrs[0], err)
+	}
+
+	if opts.TokenFile != "" {
+		if err := writeTokenFile(opts.TokenFile, token); err != nil {
+			_ = ln.Close()
+			return nil, err
+		}
+	}
+
+	logger := opts.Logger.With("profile", opts.Profile, "region", opts.Region)
+	s := &Server{
+		http:  httpserve.Start(newHandler(token, logger, opts.Credentials), []net.Listener{ln}, logger),
+		token: token,
+		done:  make(chan struct{}),
+	}
+
+	go func() {
+		defer close(s.done)
+		<-s.http.Done()
+		if opts.TokenFile == "" {
+			return
+		}
+		if err := removeTokenFile(opts.TokenFile, token); err != nil {
+			logger.Error("token file cleanup error", "error", err)
+		}
+	}()
+
+	return s, nil
+}
+
+// URLs returns the HTTP base URL of the listener, with an all-interfaces
+// bind reported as loopback.
+func (s *Server) URLs() []string {
+	return s.http.URLs()
+}
+
+// CredentialsURL returns the full credentials endpoint URL for a client on
+// this host.
+func (s *Server) CredentialsURL() string {
+	return s.http.URLs()[0] + Path
+}
+
+// Token returns the authorisation token clients send verbatim in the
+// Authorization header.
+func (s *Server) Token() string {
+	return string(s.token)
+}
+
+// Stop initiates a hard shutdown. Safe to call multiple times.
+func (s *Server) Stop() {
+	s.http.Stop()
+}
+
+// Done returns a channel that is closed once the server has stopped and its
+// token file has been removed.
+func (s *Server) Done() <-chan struct{} {
+	return s.done
+}
