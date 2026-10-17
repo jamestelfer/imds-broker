@@ -207,6 +207,27 @@ func TestCredentialDetailEndpoint(t *testing.T) {
 	assert.NotEmpty(t, resp.Expiration)
 }
 
+func TestCredentialDetailEndpoint_SurvivesClientCancellation(t *testing.T) {
+	valid := testCreds()
+	ctxBound := aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
+		if err := ctx.Err(); err != nil {
+			return aws.Credentials{}, err
+		}
+		return valid.Retrieve(ctx)
+	})
+	h := newHandler("us-east-1", "TestRole", "", slog.New(slog.DiscardHandler), ctxBound)
+	tok := getToken(t, h, 60)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/latest/meta-data/iam/security-credentials/TestRole", nil)
+	req.Header.Set(headerToken, tok)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
 // --- Instance identity document endpoint ---
 
 func TestInstanceIdentityDocumentEndpoint(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/justinas/alice"
 
+	"github.com/jamestelfer/imds-broker/pkg/awscreds"
 	"github.com/jamestelfer/imds-broker/pkg/httplog"
 )
 
@@ -183,12 +184,7 @@ func (h *imdsHandler) handleCredentialDetail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Use a detached context for credential retrieval. SSO credentials require
-	// a network round-trip to refresh; tying that to r.Context() causes
-	// "context canceled" failures if the client's read deadline fires first.
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	creds, err := h.creds.Retrieve(ctx)
+	creds, err := awscreds.Retrieve(r.Context(), h.creds)
 	if err != nil {
 		logger.Error("failed to retrieve credentials", "error", err)
 		writeError(w, http.StatusInternalServerError, "InternalError", "Failed to retrieve credentials")

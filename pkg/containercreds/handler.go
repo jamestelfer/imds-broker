@@ -12,13 +12,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/justinas/alice"
 
+	"github.com/jamestelfer/imds-broker/pkg/awscreds"
 	"github.com/jamestelfer/imds-broker/pkg/httplog"
 )
-
-// retrieveTimeout bounds credential retrieval. SSO refreshes need a network
-// round-trip, so retrieval is detached from the client's request context and
-// given its own deadline instead.
-const retrieveTimeout = 30 * time.Second
 
 // CredentialProvider abstracts AWS credential retrieval. The server adds no
 // caching; production wiring supplies an aws.CredentialsCache.
@@ -88,10 +84,7 @@ func (h *handler) authorise(next http.Handler) http.Handler {
 func (h *handler) handleCredentials(w http.ResponseWriter, r *http.Request) {
 	logger := httplog.FromContext(r.Context())
 
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), retrieveTimeout)
-	defer cancel()
-
-	creds, err := h.creds.Retrieve(ctx)
+	creds, err := awscreds.Retrieve(r.Context(), h.creds)
 	if err != nil {
 		logger.Error("failed to retrieve credentials", "error", err)
 		writeError(w, http.StatusInternalServerError, "CredentialsUnavailable", "Failed to retrieve credentials")
