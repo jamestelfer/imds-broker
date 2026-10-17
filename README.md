@@ -258,7 +258,9 @@ Deployment guidance for docker-compose:
 - Set `AWS_CONTAINER_CREDENTIALS_FULL_URI=http://169.254.170.23:<port>/2016-11-01/credentials` and `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE=<shared-token-path>` in the client.
 - Gate client startup on a broker healthcheck that asserts the token file is present and non-empty.
 
-The token is defence-in-depth against stray containers on the shared network. It does not protect credentials from the client, which is the intended recipient. The container protocol does not apply the IMDS connection filter; the token gates every request, including requests for unknown paths. Keeping the token file away from other workloads depends on the sandbox boundary.
+The token is defence-in-depth against stray containers on the shared network. It does not protect credentials from the client, which is the intended recipient. Keeping the token file away from other workloads depends on the sandbox boundary.
+
+The container protocol does not apply the IMDS connection filter. That filter excludes the default-route subnet, and inside a compose network the shared bridge is the default route, so it would reject the intended clients. The listener therefore accepts connections from any network it is bound to, and the 256-bit token is the only control. The token gates every request, including requests for unknown paths. When clients run on the host, pass `--bind 127.0.0.1` to keep the listener off other networks.
 
 The MCP server remains IMDS-only. The container protocol is available only through `serve`.
 

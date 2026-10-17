@@ -67,6 +67,8 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		return nil, err
 	}
 
+	// No peer filter: the IMDS allow-list excludes the default-route subnet, which
+	// is the shared bridge in compose. The token is the only access control.
 	ln, err := httpserve.Listen(opts.BindAddrs[0])
 	if err != nil {
 		return nil, fmt.Errorf("containercreds: listen on %s: %w", opts.BindAddrs[0], err)
