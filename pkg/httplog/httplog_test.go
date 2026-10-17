@@ -23,7 +23,7 @@ func TestMiddleware_InjectsRequestLoggerAndLogsRequest(t *testing.T) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/x", nil)
 	h.ServeHTTP(httptest.NewRecorder(), req)
 
 	dec := json.NewDecoder(&buf)
@@ -40,6 +40,6 @@ func TestMiddleware_InjectsRequestLoggerAndLogsRequest(t *testing.T) {
 }
 
 func TestFromContext_DefaultsWhenAbsent(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	assert.Equal(t, slog.Default(), httplog.FromContext(req.Context()))
 }

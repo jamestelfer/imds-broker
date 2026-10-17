@@ -41,7 +41,7 @@ func TestHandler_ServesCachedCredentialsUntilExpiry(t *testing.T) {
 		h := newHandler(token, slog.New(slog.DiscardHandler), cache)
 
 		fetch := func() map[string]string {
-			req := httptest.NewRequest(http.MethodGet, Path, nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, Path, nil)
 			req.Header.Set("Authorization", string(token))
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, req)
