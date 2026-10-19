@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.1](https://github.com/jamestelfer/imds-broker/compare/v0.5.0...v0.5.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **ci:** publish a Nix recipe ([#55](https://github.com/jamestelfer/imds-broker/issues/55)) ([3156355](https://github.com/jamestelfer/imds-broker/commit/3156355d15cf8b6bcfd80eef7c9ead27a2fdc403))
+* **deps:** update dependency go to v1.27.2 ([#51](https://github.com/jamestelfer/imds-broker/issues/51)) ([004203e](https://github.com/jamestelfer/imds-broker/commit/004203e3264e49104f764a3186c8cc314cebada3))
+* **deps:** update dependency goreleaser to v2.18.3 ([#52](https://github.com/jamestelfer/imds-broker/issues/52)) ([ac7b0f2](https://github.com/jamestelfer/imds-broker/commit/ac7b0f2ca72623afd72c5067c3ccd4f43cde5328))
+* **deps:** update github actions ([#48](https://github.com/jamestelfer/imds-broker/issues/48)) ([20b715e](https://github.com/jamestelfer/imds-broker/commit/20b715ec3e906f8352c2b89679f861572aab52c1))
+* **deps:** update go dependencies ([#49](https://github.com/jamestelfer/imds-broker/issues/49)) ([4a9ce4e](https://github.com/jamestelfer/imds-broker/commit/4a9ce4e9fa6e9aabac021073234789ef9c45cfa5))
+* **deps:** update jdx/mise-action action to v5.1.2 ([#54](https://github.com/jamestelfer/imds-broker/issues/54)) ([2368c0e](https://github.com/jamestelfer/imds-broker/commit/2368c0ebd643eed26b6915897b270af7d3e53e21))
+* **deps:** update module github.com/mark3labs/mcp-go to v1.3.0 ([#56](https://github.com/jamestelfer/imds-broker/issues/56)) ([eb09614](https://github.com/jamestelfer/imds-broker/commit/eb096140b4c727d66cf69c1080deec856d01dbef))
+
 ## [0.5.0](https://github.com/jamestelfer/imds-broker/compare/v0.4.0...v0.5.0) (2026-10-11)
 
 
