@@ -125,7 +125,7 @@ npm install -g @jamestelfer/imds-broker
 <summary><strong>Nix</strong></summary>
 
 ```sh
-nix profile install github:jamestelfer/imds-broker
+nix profile install github:jamestelfer/nixpkgs#imds-broker
 ```
 
 </details>

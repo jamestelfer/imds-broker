@@ -64,3 +64,15 @@ homebrew_casks:
           run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/imds-broker"]
         end
       end
+
+nix:
+  - name: imds-broker
+    repository:
+      owner: jamestelfer
+      name: nixpkgs
+      token: "{{ .Env.NIX_GITHUB_TOKEN }}"
+    # skip publishing the recipe on a prerelease, as for the cask.
+    skip_upload: auto
+    homepage: "https://github.com/jamestelfer/imds-broker"
+    description: "Vends AWS credentials via IMDSv2 for Docker containers, local dev tools, and AI agents — no credential env vars needed"
+    license: "asl20"
