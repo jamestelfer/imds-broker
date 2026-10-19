@@ -14,10 +14,10 @@ type Server interface {
 	Done() <-chan struct{}
 }
 
-// ServerFactory creates a new IMDS server for the given profile, region, and
-// bind addresses. Returns an error if the profile is invalid or the server
-// cannot start.
-type ServerFactory func(ctx context.Context, profile, region string, bindAddrs []string, logger *slog.Logger) (Server, error)
+// ServerFactory creates a new credential server for the given profile, region,
+// and bind addresses, and returns attributes describing it for the startup
+// log. Returns an error if the profile is invalid or the server cannot start.
+type ServerFactory func(ctx context.Context, profile, region string, bindAddrs []string, logger *slog.Logger) (Server, []slog.Attr, error)
 
 // CreateResult contains the URLs for a created (or existing) IMDS server.
 type CreateResult struct {
@@ -84,10 +84,11 @@ func (b *Broker) CreateServer(ctx context.Context, profile, region string) (Crea
 		b.cleanupEntry(e)
 	}
 
-	srv, err := b.factory(ctx, profile, region, b.buildBindAddrs(), b.logger)
+	srv, attrs, err := b.factory(ctx, profile, region, b.buildBindAddrs(), b.logger)
 	if err != nil {
 		return CreateResult{}, err
 	}
+	b.logger.LogAttrs(ctx, slog.LevelInfo, "broker: server started", append(attrs, slog.String("key", key))...)
 
 	e := &entry{
 		server:   srv,

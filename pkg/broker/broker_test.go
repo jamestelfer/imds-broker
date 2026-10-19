@@ -1,6 +1,7 @@
 package broker_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -41,13 +42,13 @@ func (f *fakeServer) closeDone() {
 // fakeFactory returns a ServerFactory that returns servers from the provided map
 // keyed by "profile:region". If a key is missing it returns an error.
 func fakeFactory(servers map[string]*fakeServer) broker.ServerFactory {
-	return func(_ context.Context, profile, region string, _ []string, _ *slog.Logger) (broker.Server, error) {
+	return func(_ context.Context, profile, region string, _ []string, _ *slog.Logger) (broker.Server, []slog.Attr, error) {
 		key := profile + ":" + region
 		srv, ok := servers[key]
 		if !ok {
-			return nil, errors.New("broker: unknown profile: " + profile)
+			return nil, nil, errors.New("broker: unknown profile: " + profile)
 		}
-		return srv, nil
+		return srv, nil, nil
 	}
 }
 
@@ -85,9 +86,9 @@ func TestCreateServer_ReturnsLocalURL(t *testing.T) {
 func TestCreateServer_Deduplication(t *testing.T) {
 	srv := newFakeServer("http://127.0.0.1:12345")
 	calls := 0
-	factory := func(_ context.Context, _, _ string, _ []string, _ *slog.Logger) (broker.Server, error) {
+	factory := func(_ context.Context, _, _ string, _ []string, _ *slog.Logger) (broker.Server, []slog.Attr, error) {
 		calls++
-		return srv, nil
+		return srv, nil, nil
 	}
 	b := newTestBroker(t, factory)
 
@@ -106,12 +107,12 @@ func TestCreateServer_ReplacesCrashedServer(t *testing.T) {
 	first := newFakeServer("http://127.0.0.1:11111")
 	second := newFakeServer("http://127.0.0.1:22222")
 	callCount := 0
-	factory := func(_ context.Context, _, _ string, _ []string, _ *slog.Logger) (broker.Server, error) {
+	factory := func(_ context.Context, _, _ string, _ []string, _ *slog.Logger) (broker.Server, []slog.Attr, error) {
 		callCount++
 		if callCount == 1 {
-			return first, nil
+			return first, nil, nil
 		}
-		return second, nil
+		return second, nil, nil
 	}
 	b := newTestBroker(t, factory)
 
@@ -160,12 +161,12 @@ func TestStopServer_AllowsReuseOfKey(t *testing.T) {
 	first := newFakeServer("http://127.0.0.1:11111")
 	second := newFakeServer("http://127.0.0.1:22222")
 	callCount := 0
-	factory := func(_ context.Context, _, _ string, _ []string, _ *slog.Logger) (broker.Server, error) {
+	factory := func(_ context.Context, _, _ string, _ []string, _ *slog.Logger) (broker.Server, []slog.Attr, error) {
 		callCount++
 		if callCount == 1 {
-			return first, nil
+			return first, nil, nil
 		}
-		return second, nil
+		return second, nil, nil
 	}
 	b := newTestBroker(t, factory)
 
@@ -193,9 +194,9 @@ func TestCreateServer_FactoryError_PropagatesError(t *testing.T) {
 func TestCreateServer_BindsToAllInterfaces(t *testing.T) {
 	var capturedBindAddrs []string
 	srv := newFakeServer("http://127.0.0.1:11111")
-	factory := func(_ context.Context, _, _ string, bindAddrs []string, _ *slog.Logger) (broker.Server, error) {
+	factory := func(_ context.Context, _, _ string, bindAddrs []string, _ *slog.Logger) (broker.Server, []slog.Attr, error) {
 		capturedBindAddrs = bindAddrs
-		return srv, nil
+		return srv, nil, nil
 	}
 	b := newTestBroker(t, factory)
 
@@ -212,12 +213,12 @@ func TestStopAll_StopsAllServers(t *testing.T) {
 	srv1 := newFakeServer("http://127.0.0.1:11111")
 	srv2 := newFakeServer("http://127.0.0.1:22222")
 	callCount := 0
-	factory := func(_ context.Context, profile, _ string, _ []string, _ *slog.Logger) (broker.Server, error) {
+	factory := func(_ context.Context, profile, _ string, _ []string, _ *slog.Logger) (broker.Server, []slog.Attr, error) {
 		callCount++
 		if profile == "prod" {
-			return srv1, nil
+			return srv1, nil, nil
 		}
-		return srv2, nil
+		return srv2, nil, nil
 	}
 	b := newTestBroker(t, factory)
 
@@ -238,4 +239,21 @@ func TestStopAll_StopsAllServers(t *testing.T) {
 	default:
 		t.Fatal("expected srv2 to be stopped")
 	}
+}
+
+func TestCreateServer_LogsFactoryAttributes(t *testing.T) {
+	var logs bytes.Buffer
+	factory := func(_ context.Context, _, _ string, _ []string, _ *slog.Logger) (broker.Server, []slog.Attr, error) {
+		return newFakeServer("http://127.0.0.1:11111"), []slog.Attr{slog.String("protocol", "test")}, nil
+	}
+	b, err := broker.New(t.Context(), broker.Options{
+		Logger:        slog.New(slog.NewJSONHandler(&logs, nil)),
+		ServerFactory: factory,
+	})
+	require.NoError(t, err)
+
+	_, err = b.CreateServer(t.Context(), "prod", "us-east-1")
+	require.NoError(t, err)
+
+	assert.Contains(t, logs.String(), `"protocol":"test"`)
 }
