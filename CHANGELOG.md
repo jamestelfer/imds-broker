@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.2](https://github.com/jamestelfer/imds-broker/compare/v0.5.1...v0.5.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency go to v1.27.3 ([#59](https://github.com/jamestelfer/imds-broker/issues/59)) ([9a95733](https://github.com/jamestelfer/imds-broker/commit/9a95733fb34ff4904804482ee6c33e6e5845bf40))
+* **deps:** update dependency go to v1.27.4 ([#66](https://github.com/jamestelfer/imds-broker/issues/66)) ([5aa50cc](https://github.com/jamestelfer/imds-broker/commit/5aa50cc6294b09d9899f538a3438566f06374c40))
+* **deps:** update dependency goreleaser to v2.20.0 ([#64](https://github.com/jamestelfer/imds-broker/issues/64)) ([31c525b](https://github.com/jamestelfer/imds-broker/commit/31c525b068b03e71bd0ba91dee351ccde0e43aca))
+* **deps:** update github actions ([#58](https://github.com/jamestelfer/imds-broker/issues/58)) ([500c73d](https://github.com/jamestelfer/imds-broker/commit/500c73d7b30e18964aa6a83e179966085db8db52))
+* **deps:** update go dependencies ([#60](https://github.com/jamestelfer/imds-broker/issues/60)) ([46820fb](https://github.com/jamestelfer/imds-broker/commit/46820fb295c46fc6f395ae27c62d4663b7112eea))
+* **deps:** update mise packages ([#57](https://github.com/jamestelfer/imds-broker/issues/57)) ([7487fc5](https://github.com/jamestelfer/imds-broker/commit/7487fc5c1bcc4d5ed5d86b0c1870645f9cb2c705))
+
 ## [0.5.1](https://github.com/jamestelfer/imds-broker/compare/v0.5.0...v0.5.1) (2026-10-19)
 
 
