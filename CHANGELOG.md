@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0](https://github.com/jamestelfer/imds-broker/compare/v0.5.2...v0.6.0) (2026-11-17)
+
+
+### Features
+
+* serve credentials over the container credentials protocol ([#37](https://github.com/jamestelfer/imds-broker/issues/37)) ([fb2bb9a](https://github.com/jamestelfer/imds-broker/commit/fb2bb9a0b30d03ee2dee35b18a87a9fd3689bd4f))
+
+
+### Bug Fixes
+
+* **deps:** update dependency goreleaser to v2.20.1 ([#67](https://github.com/jamestelfer/imds-broker/issues/67)) ([fbb1152](https://github.com/jamestelfer/imds-broker/commit/fbb1152a462af852396073bb78a51f185bb8ed56))
+* **deps:** update go dependencies ([#63](https://github.com/jamestelfer/imds-broker/issues/63)) ([a2df25d](https://github.com/jamestelfer/imds-broker/commit/a2df25d1a8d2bc241204ddd3d7ac22f96fa13603))
+* **deps:** update node.js to v26 ([#61](https://github.com/jamestelfer/imds-broker/issues/61)) ([8f59a37](https://github.com/jamestelfer/imds-broker/commit/8f59a371e5bb642e9ad73f78718af84e04893a1f))
+
 ## [0.5.2](https://github.com/jamestelfer/imds-broker/compare/v0.5.1...v0.5.2) (2026-11-12)
 
 
