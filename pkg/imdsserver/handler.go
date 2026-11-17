@@ -11,6 +11,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/justinas/alice"
+
+	"github.com/jamestelfer/imds-broker/pkg/httplog"
 )
 
 const (
@@ -84,7 +86,7 @@ func (h *imdsHandler) buildMux() http.Handler {
 	mux.Handle("GET /latest/meta-data/iam/security-credentials/", protected.ThenFunc(h.handleCredentialList))
 	mux.Handle("GET /latest/meta-data/iam/security-credentials/{role}", protected.ThenFunc(h.handleCredentialDetail))
 
-	return alice.New(h.logRequest).Then(mux)
+	return alice.New(httplog.Middleware(h.logger)).Then(mux)
 }
 
 func (h *imdsHandler) availabilityZone() string {
@@ -133,21 +135,8 @@ func (h *imdsHandler) requireToken(next http.Handler) http.Handler {
 	})
 }
 
-// logRequest is middleware that logs every incoming request.
-func (h *imdsHandler) logRequest(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sw := &statusWriter{ResponseWriter: w, code: http.StatusOK}
-		next.ServeHTTP(sw, r)
-		h.logger.Info("http request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", sw.code,
-			"client", r.RemoteAddr,
-		)
-	})
-}
-
 func (h *imdsHandler) handleInstanceIdentityDocument(w http.ResponseWriter, r *http.Request) {
+	logger := httplog.FromContext(r.Context())
 	accountID := h.accountID
 	if accountID == "" {
 		accountID = "000000000000"
@@ -162,7 +151,7 @@ func (h *imdsHandler) handleInstanceIdentityDocument(w http.ResponseWriter, r *h
 
 	body, err := json.Marshal(doc)
 	if err != nil {
-		h.logger.Error("failed to marshal identity document", "error", err)
+		logger.Error("failed to marshal identity document", "error", err)
 		writeError(w, http.StatusInternalServerError, "InternalError", "Failed to build response")
 		return
 	}
@@ -187,6 +176,7 @@ func (h *imdsHandler) handleCredentialList(w http.ResponseWriter, _ *http.Reques
 }
 
 func (h *imdsHandler) handleCredentialDetail(w http.ResponseWriter, r *http.Request) {
+	logger := httplog.FromContext(r.Context())
 	role := r.PathValue("role")
 	if role != h.principalName {
 		writeError(w, http.StatusNotFound, "InvalidRole", "Unknown role name")
@@ -200,7 +190,7 @@ func (h *imdsHandler) handleCredentialDetail(w http.ResponseWriter, r *http.Requ
 	defer cancel()
 	creds, err := h.creds.Retrieve(ctx)
 	if err != nil {
-		h.logger.Error("failed to retrieve credentials", "error", err)
+		logger.Error("failed to retrieve credentials", "error", err)
 		writeError(w, http.StatusInternalServerError, "InternalError", "Failed to retrieve credentials")
 		return
 	}
@@ -225,7 +215,7 @@ func (h *imdsHandler) handleCredentialDetail(w http.ResponseWriter, r *http.Requ
 
 	body, err := json.Marshal(resp)
 	if err != nil {
-		h.logger.Error("failed to marshal credential response", "error", err)
+		logger.Error("failed to marshal credential response", "error", err)
 		writeError(w, http.StatusInternalServerError, "InternalError", "Failed to build response")
 		return
 	}
@@ -250,15 +240,4 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	w.WriteHeader(status)
 	body, _ := json.Marshal(errBody{Error: innerErr{Code: code, Message: message}})
 	_, _ = w.Write(body)
-}
-
-// statusWriter captures the HTTP status code for logging.
-type statusWriter struct {
-	http.ResponseWriter
-	code int
-}
-
-func (sw *statusWriter) WriteHeader(code int) {
-	sw.code = code
-	sw.ResponseWriter.WriteHeader(code)
 }
